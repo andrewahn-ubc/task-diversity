@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import os
 import platform
@@ -14,15 +15,47 @@ import torch
 
 from .config import load_config
 from .env import VectorBanyan
+from .model import RecurrentActorCritic
 from .taskgen import build_catalog
 
 
+NARVAL_VERSIONS = {"matplotlib": "3.9.2", "numpy": "1.26.4", "torch": "2.6.0"}
+
+
 def run_preflight(
-    config_path: str, require_cuda: bool, require_python_311: bool = False
+    config_path: str,
+    require_cuda: bool,
+    require_python_311: bool = False,
+    require_narval_runtime: bool = False,
 ) -> dict[str, Any]:
     config = load_config(config_path)
     if require_python_311 and sys.version_info[:2] != (3, 11):
         raise RuntimeError(f"Python 3.11 is required, found {platform.python_version()}")
+    installed_versions = {
+        package: importlib.metadata.version(package) for package in NARVAL_VERSIONS
+    }
+    if require_narval_runtime:
+        base_versions = {
+            package: version.split("+", 1)[0]
+            for package, version in installed_versions.items()
+        }
+        if base_versions != NARVAL_VERSIONS:
+            raise RuntimeError(
+                f"Narval package mismatch: expected {NARVAL_VERSIONS}, found {installed_versions}"
+            )
+        non_alliance = {
+            package: version
+            for package, version in installed_versions.items()
+            if "+computecanada" not in version
+        }
+        if non_alliance:
+            raise RuntimeError(
+                f"Expected Alliance +computecanada direct wheels, found {non_alliance}"
+            )
+        if torch.version.cuda is None:
+            raise RuntimeError(
+                "The installed Torch wheel is CPU-only; Narval requires an Alliance CUDA build"
+            )
     if require_cuda and not torch.cuda.is_available():
         raise RuntimeError("CUDA preflight failed: torch.cuda.is_available() is false")
     device = torch.device("cuda" if require_cuda else "cpu")
@@ -30,6 +63,12 @@ def run_preflight(
         capability = torch.cuda.get_device_capability(device)
         if capability < (8, 0):
             raise RuntimeError(f"An Ampere-or-newer GPU is required, found capability {capability}")
+        if "sm_80" not in torch.cuda.get_arch_list():
+            raise RuntimeError(
+                f"Torch lacks A100 sm_80 kernels: compiled arches={torch.cuda.get_arch_list()}"
+            )
+        if not torch.backends.cudnn.is_available():
+            raise RuntimeError("Torch cannot access its cuDNN runtime")
     catalog = build_catalog(
         config.experiment.num_distributions,
         max(config.experiment.diversities),
@@ -63,6 +102,23 @@ def run_preflight(
         raise RuntimeError("Environment observation shape check failed")
     if not torch.isfinite(reward).all() or done.shape != (8,):
         raise RuntimeError("Environment step check failed")
+    if require_cuda:
+        probe_model = RecurrentActorCritic(
+            grid_size=config.environment.grid_size,
+            object_feature_dim=config.environment.object_feature_dim,
+            hidden_size=32,
+            walls=probe_env.walls,
+        ).to(device)
+        logits, values, hidden = probe_model.forward_step(
+            obs,
+            probe_model.initial_hidden(8, device),
+            torch.ones(8, dtype=torch.bool, device=device),
+        )
+        probe_loss = logits.square().mean() + values.square().mean() + hidden.square().mean()
+        probe_loss.backward()
+        torch.cuda.synchronize(device)
+        if not torch.isfinite(probe_loss):
+            raise RuntimeError("CUDA convolution/GRU/autograd probe returned a non-finite loss")
     payload: dict[str, Any] = {
         "status": "ok",
         "python": platform.python_version(),
@@ -70,6 +126,7 @@ def run_preflight(
         "torch": torch.__version__,
         "numpy": np.__version__,
         "matplotlib": matplotlib.__version__,
+        "installed_versions": installed_versions,
         "platform": platform.platform(),
         "config": str(config_path),
         "config_fingerprint": config.fingerprint(),
@@ -80,6 +137,8 @@ def run_preflight(
         "torch_cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(device) if require_cuda else None,
         "gpu_capability": torch.cuda.get_device_capability(device) if require_cuda else None,
+        "torch_arch_list": torch.cuda.get_arch_list() if require_cuda else None,
+        "cudnn_version": torch.backends.cudnn.version() if require_cuda else None,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
     }
     return payload
@@ -90,9 +149,15 @@ def main() -> int:
     parser.add_argument("--config", required=True)
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--require-python-311", action="store_true")
+    parser.add_argument("--require-narval-runtime", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
-    payload = run_preflight(args.config, args.require_cuda, args.require_python_311)
+    payload = run_preflight(
+        args.config,
+        args.require_cuda,
+        args.require_python_311,
+        args.require_narval_runtime,
+    )
     rendered = json.dumps(payload, indent=2, sort_keys=True)
     print(rendered)
     if args.output:

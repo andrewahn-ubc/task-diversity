@@ -1,5 +1,5 @@
-# Top-level dependencies only.  Transitive versions are captured in
-# results/environment/pip-freeze.txt when the Narval environment is created.
+# Top-level dependencies only. The launcher verifies the complete offline
+# wheel closure and records both pip's resolution report and installed metadata.
 torch==2.6.0
 numpy==1.26.4
 matplotlib==3.9.2

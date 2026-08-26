@@ -27,12 +27,16 @@ That command does all of the following without contacting PyPI:
 1. loads `StdEnv/2023` and `python/3.11`;
 2. asks Narval's `avail_wheels` to verify every pinned requirement;
 3. creates/validates `.venv-narval` with a repository-local `virtualenv` seed
-   cache, then installs only the three top-level packages from the Alliance
-   wheelhouse with both `PIP_NO_INDEX=1` and `--no-index`;
-4. submits a three-condition smoke array;
-5. gates the full 15-run array on both successful smoke jobs and a nontrivial
+   cache;
+4. resolves the full transitive closure offline, rejecting source archives and
+   anything outside the Alliance CVMFS wheelhouse, then installs the three
+   top-level packages with both `PIP_NO_INDEX=1` and `--no-index`;
+5. verifies exact package versions, the Alliance CUDA-enabled Torch build, and
+   the resolved dependency graph;
+6. submits a three-condition smoke array;
+7. gates the full 15-run array on both successful smoke jobs and a nontrivial
    learning check; and
-6. aggregates the complete sweep into CSV/JSON, five figures, and a Markdown
+8. aggregates the complete sweep into CSV/JSON, five figures, and a Markdown
    report.
 
 The jobs charge `def-mijungp`. The submission command prints every job ID and
@@ -73,8 +77,11 @@ results/
     figure5_backward_d1.png
   report.md
   environment/
+    offline-resolution.json
+    pip-inspect.json
+    pip-config.txt
     pip-freeze.txt
-    preflight.json
+    preflight-login.json
 ```
 
 ## Focused local checks

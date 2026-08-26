@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import PurePosixPath
 
 import torch
 
 from banyan_pilot.config import load_config
+from banyan_pilot.dependency_audit import audit_resolution
 from banyan_pilot.env import DROP, TOGGLE, VectorBanyan
 from banyan_pilot.model import RecurrentActorCritic
 from banyan_pilot.ppo import collect_rollout, gradient_cosines, update_ppo
@@ -44,6 +46,36 @@ class PilotCoreTests(unittest.TestCase):
                 self.assertFalse(signatures[left] & signatures[right])
         topology_tasks = self.catalog.phase_topology_tasks[0][0]
         self.assertEqual([self.catalog.tasks[index].depth for index in topology_tasks], list(range(1, 7)))
+
+    def test_offline_dependency_report_rejects_non_wheelhouse_source(self) -> None:
+        root = PurePosixPath("/cvmfs/soft.computecanada.ca/custom/python/wheelhouse")
+
+        def item(name: str, version: str, path: str, requested: bool = True) -> dict:
+            return {
+                "download_info": {"url": f"file://{path}"},
+                "metadata": {"name": name, "version": version},
+                "requested": requested,
+            }
+
+        report = {
+            "version": "1",
+            "environment": {
+                "implementation_name": "cpython",
+                "platform_machine": "x86_64",
+                "platform_system": "Linux",
+                "python_version": "3.11",
+            },
+            "install": [
+                item("torch", "2.6.0+computecanada", f"{root}/torch.whl"),
+                item("numpy", "1.26.4+computecanada", f"{root}/numpy.whl"),
+                item("matplotlib", "3.9.2+computecanada", f"{root}/matplotlib.whl"),
+                item("filelock", "3.16.1", f"{root}/filelock.whl", requested=False),
+            ]
+        }
+        self.assertEqual(len(audit_resolution(report)), 4)
+        report["install"][-1]["download_info"]["url"] = "file:///home/user/filelock.whl"
+        with self.assertRaisesRegex(ValueError, "non-Alliance"):
+            audit_resolution(report)
 
     def test_unary_goal_success(self) -> None:
         task = next(

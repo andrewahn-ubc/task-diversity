@@ -22,27 +22,54 @@ if ! command -v sbatch >/dev/null 2>&1 && [[ "$MODE" != "--preflight-only" ]]; t
   exit 2
 fi
 
+# Do not let a caller's user packages or project paths contaminate the Narval
+# module stack. This script runs in a subprocess, so these changes do not alter
+# the caller's interactive shell.
+unset PYTHONHOME PYTHONPATH VIRTUAL_ENV
+while IFS='=' read -r variable _; do
+  case "$variable" in
+    PIP_*|VIRTUALENV_*) unset "$variable" ;;
+  esac
+done < <(env)
+export PYTHONNOUSERSITE=1
+
 module --force purge
 module load StdEnv/2023 python/3.11
 
 BASE_PYTHON="$(command -v python)"
 "$BASE_PYTHON" - <<'PY'
+import os
 import sys
 
 if sys.version_info[:2] != (3, 11):
     raise SystemExit(
         f"Expected Python 3.11 after loading the Narval module, got {sys.version}"
     )
+executable = os.path.realpath(sys.executable)
+if not executable.startswith("/cvmfs/soft.computecanada.ca/"):
+    raise SystemExit(f"Expected Alliance CVMFS Python, got {executable}")
 PY
 
 echo "Verifying pinned wheels in Narval's active StdEnv/2023 + Python 3.11 environment..."
-avail_wheels -r requirements-narval.txt
+avail_wheels -r requirements-narval.txt --not-available
 
 VENV_DIR="$REPO_ROOT/.venv-narval"
 VIRTUALENV_APP_DATA="$REPO_ROOT/.virtualenv-app-data"
+VENV_STAMP="$VENV_DIR/.banyan-environment-schema"
+ENVIRONMENT_SCHEMA="$("$BASE_PYTHON" - requirements-narval.txt <<'PY'
+import hashlib
+import pathlib
+import sys
+
+digest = hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()
+print(f"narval-bootstrap-v2:{digest}")
+PY
+)"
 
 venv_is_usable() {
   [[ -x "$VENV_DIR/bin/python" ]] &&
+    [[ -f "$VENV_STAMP" ]] &&
+    [[ "$(<"$VENV_STAMP")" == "$ENVIRONMENT_SCHEMA" ]] &&
     "$VENV_DIR/bin/python" - <<'PY' >/dev/null 2>&1
 import sys
 import pip
@@ -67,18 +94,42 @@ source "$VENV_DIR/bin/activate"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_NO_INDEX=1
 export PIP_NO_CACHE_DIR=1
-python -m pip install --no-index --requirement requirements-narval.txt
-python -m pip check
+export PIP_REQUIRE_VIRTUALENV=1
 
 mkdir -p results/environment logs
 export MPLCONFIGDIR="$REPO_ROOT/results/environment/matplotlib-cache"
 mkdir -p "$MPLCONFIGDIR"
+
+# Resolve the complete dependency closure afresh even when the environment is
+# already populated. The JSON report lets us reject an sdist, a user-local
+# wheel, or any source outside the Alliance CVMFS wheelhouse before installing.
+python -m pip install \
+  --dry-run \
+  --ignore-installed \
+  --no-index \
+  --only-binary=:all: \
+  --report results/environment/offline-resolution.json \
+  --requirement requirements-narval.txt
+
+PYTHONPATH="$REPO_ROOT/src" python -m banyan_pilot.dependency_audit \
+  results/environment/offline-resolution.json
+
+python -m pip install \
+  --no-index \
+  --only-binary=:all: \
+  --requirement requirements-narval.txt
+python -m pip check
+
 python -m pip freeze --local > results/environment/pip-freeze.txt
-export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+python -m pip inspect --local > results/environment/pip-inspect.json
+python -m pip config debug > results/environment/pip-config.txt
+export PYTHONPATH="$REPO_ROOT/src"
 python -m banyan_pilot.preflight \
   --config configs/main.toml \
   --require-python-311 \
+  --require-narval-runtime \
   --output results/environment/preflight-login.json
+printf '%s\n' "$ENVIRONMENT_SCHEMA" > "$VENV_STAMP"
 
 if [[ "$MODE" == "--preflight-only" ]]; then
   echo "Narval dependency and CPU preflight passed. No jobs submitted."
