@@ -23,7 +23,13 @@ The Alliance recommends `virtualenv --no-download` and `pip install
 specifically recommends installing the `torch` wheel this way and does not
 require a separate CUDA module in the batch example. The repository follows
 that pattern exactly: `StdEnv/2023` plus `python/3.11`, then a persistent
-project-local virtual environment.
+project-local virtual environment. The launcher also gives `virtualenv` a
+repository-local app-data directory, so a stale or corrupt seed cache under
+`~/.local/share/virtualenv` cannot affect environment creation. It validates
+both Python 3.11 and `pip` before reusing `.venv-narval`; a partial environment
+left by an interrupted setup is rebuilt automatically. Pip's index, version
+check, and cache are also disabled explicitly, and Matplotlib uses a
+project-local writable cache during login-node preflight.
 
 Sources: [Alliance Python documentation](https://docs.alliancecan.ca/wiki/Python/en),
 [Alliance PyTorch documentation](https://docs.alliancecan.ca/wiki/PyTorch/en).

@@ -26,8 +26,9 @@ That command does all of the following without contacting PyPI:
 
 1. loads `StdEnv/2023` and `python/3.11`;
 2. asks Narval's `avail_wheels` to verify every pinned requirement;
-3. creates/reuses `.venv-narval` and installs only the three top-level packages
-   from the Alliance wheelhouse with `--no-index`;
+3. creates/validates `.venv-narval` with a repository-local `virtualenv` seed
+   cache, then installs only the three top-level packages from the Alliance
+   wheelhouse with both `PIP_NO_INDEX=1` and `--no-index`;
 4. submits a three-condition smoke array;
 5. gates the full 15-run array on both successful smoke jobs and a nontrivial
    learning check; and

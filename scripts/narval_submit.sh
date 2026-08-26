@@ -25,17 +25,54 @@ fi
 module --force purge
 module load StdEnv/2023 python/3.11
 
+BASE_PYTHON="$(command -v python)"
+"$BASE_PYTHON" - <<'PY'
+import sys
+
+if sys.version_info[:2] != (3, 11):
+    raise SystemExit(
+        f"Expected Python 3.11 after loading the Narval module, got {sys.version}"
+    )
+PY
+
 echo "Verifying pinned wheels in Narval's active StdEnv/2023 + Python 3.11 environment..."
 avail_wheels -r requirements-narval.txt
 
-if [[ ! -x .venv-narval/bin/python ]]; then
-  virtualenv --no-download .venv-narval
+VENV_DIR="$REPO_ROOT/.venv-narval"
+VIRTUALENV_APP_DATA="$REPO_ROOT/.virtualenv-app-data"
+
+venv_is_usable() {
+  [[ -x "$VENV_DIR/bin/python" ]] &&
+    "$VENV_DIR/bin/python" - <<'PY' >/dev/null 2>&1
+import sys
+import pip
+
+raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)
+PY
+}
+
+if ! venv_is_usable; then
+  echo "Creating or repairing the project-local Python environment..."
+  # An isolated app-data directory avoids stale/corrupt virtualenv seed caches
+  # in ~/.local/share. --clear also repairs a partially created environment.
+  "$BASE_PYTHON" -m virtualenv \
+    --no-download \
+    --no-periodic-update \
+    --app-data "$VIRTUALENV_APP_DATA" \
+    --reset-app-data \
+    --clear \
+    "$VENV_DIR"
 fi
-source .venv-narval/bin/activate
+source "$VENV_DIR/bin/activate"
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_NO_INDEX=1
+export PIP_NO_CACHE_DIR=1
 python -m pip install --no-index --requirement requirements-narval.txt
 python -m pip check
 
 mkdir -p results/environment logs
+export MPLCONFIGDIR="$REPO_ROOT/results/environment/matplotlib-cache"
+mkdir -p "$MPLCONFIGDIR"
 python -m pip freeze --local > results/environment/pip-freeze.txt
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 python -m banyan_pilot.preflight \

@@ -1,5 +1,6 @@
 .DS_Store
 .venv*/
+.virtualenv-app-data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -11,4 +12,5 @@ results/raw/
 results/smoke/
 results/aggregated/
 results/figures/
+results/environment/
 results/report.md
