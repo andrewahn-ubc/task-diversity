@@ -7,7 +7,7 @@ steps_per_distribution = 2097152
 eval_interval_steps = 1048576
 eval_episodes = 256
 diagnostic_fractions = [0.0, 0.5, 1.0]
-output_root = "results/smoke"
+output_root = "results/quick-check-cbp"
 
 [environment]
 grid_size = 9
@@ -31,6 +31,13 @@ entropy_coef = 0.01
 max_grad_norm = 0.5
 hidden_size = 128
 checkpoint_interval_updates = 20
+
+[cbp]
+enabled = true
+replacement_rate = 0.0001
+decay_rate = 0.99
+maturity_threshold = 100
+utility = "contribution"
 
 [diagnostics]
 num_envs = 128

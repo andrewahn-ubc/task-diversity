@@ -49,6 +49,15 @@ class PPOConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class CBPConfig:
+    enabled: bool
+    replacement_rate: float
+    decay_rate: float
+    maturity_threshold: int
+    utility: str
+
+
+@dataclasses.dataclass(frozen=True)
 class DiagnosticConfig:
     num_envs: int
     rollout_steps: int
@@ -60,6 +69,7 @@ class Config:
     experiment: ExperimentConfig
     environment: EnvironmentConfig
     ppo: PPOConfig
+    cbp: CBPConfig
     diagnostics: DiagnosticConfig
 
     def fingerprint(self) -> str:
@@ -85,13 +95,14 @@ def load_config(path: str | Path) -> Config:
     path = Path(path)
     with path.open("rb") as stream:
         raw = tomllib.load(stream)
-    expected = {"experiment", "environment", "ppo", "diagnostics"}
+    expected = {"experiment", "environment", "ppo", "cbp", "diagnostics"}
     if set(raw) != expected:
         raise ValueError(f"Config sections must be {sorted(expected)}, got {sorted(raw)}")
     config = Config(
         experiment=_convert(ExperimentConfig, raw["experiment"]),
         environment=_convert(EnvironmentConfig, raw["environment"]),
         ppo=_convert(PPOConfig, raw["ppo"]),
+        cbp=_convert(CBPConfig, raw["cbp"]),
         diagnostics=_convert(DiagnosticConfig, raw["diagnostics"]),
     )
     validate_config(config)
@@ -99,7 +110,7 @@ def load_config(path: str | Path) -> Config:
 
 
 def validate_config(config: Config) -> None:
-    exp, env, ppo = config.experiment, config.environment, config.ppo
+    exp, env, ppo, cbp = config.experiment, config.environment, config.ppo, config.cbp
     if tuple(exp.diversities) != (1, 16, 256):
         raise ValueError("Primary diversity levels must remain exactly (1, 16, 256)")
     if exp.num_distributions != 4:
@@ -110,5 +121,13 @@ def validate_config(config: Config) -> None:
         raise ValueError("Each phase must contain at least one PPO rollout")
     if ppo.minibatch_envs > env.num_envs or env.num_envs % ppo.minibatch_envs:
         raise ValueError("minibatch_envs must evenly divide num_envs")
+    if not 0.0 <= cbp.replacement_rate <= 1.0:
+        raise ValueError("CBP replacement_rate must be in [0, 1]")
+    if not 0.0 <= cbp.decay_rate < 1.0:
+        raise ValueError("CBP decay_rate must be in [0, 1)")
+    if cbp.maturity_threshold < 0:
+        raise ValueError("CBP maturity_threshold must be nonnegative")
+    if cbp.utility != "contribution":
+        raise ValueError("CBP utility must be 'contribution'")
     if any(not 0.0 <= fraction <= 1.0 for fraction in exp.diagnostic_fractions):
         raise ValueError("Diagnostic fractions must be in [0, 1]")

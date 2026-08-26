@@ -17,4 +17,4 @@ source "$REPO_ROOT/.venv-narval/bin/activate"
 export PYTHONPATH="$REPO_ROOT/src"
 export MPLCONFIGDIR="${SLURM_TMPDIR}/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
-python -m banyan_pilot.aggregate --root results/raw --output results
+python -m banyan_pilot.aggregate --root results/raw-cbp --output results/cbp

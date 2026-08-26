@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
 from .config import PPOConfig
 from .env import CompactObs, VectorBanyan, stack_observations
 from .model import RecurrentActorCritic
+
+if TYPE_CHECKING:
+    from .continual_backprop import ContinualBackprop
 
 
 @dataclasses.dataclass
@@ -101,6 +104,8 @@ def ppo_losses(
     rollout: Rollout,
     config: PPOConfig,
     env_indices: torch.Tensor | None = None,
+    *,
+    capture_cbp: bool = False,
 ) -> dict[str, torch.Tensor]:
     if env_indices is None:
         env_indices = torch.arange(rollout.actions.shape[1], device=rollout.actions.device)
@@ -109,6 +114,7 @@ def ppo_losses(
         rollout.initial_hidden[env_indices],
         rollout.episode_starts[:, env_indices],
         rollout.actions[:, env_indices],
+        capture_cbp=capture_cbp,
     )
     old_logprobs = rollout.logprobs[:, env_indices]
     advantages = rollout.advantages[:, env_indices]
@@ -140,6 +146,7 @@ def update_ppo(
     rollout: Rollout,
     config: PPOConfig,
     generator: torch.Generator,
+    continual_backprop: ContinualBackprop | None = None,
 ) -> dict[str, float]:
     num_envs = rollout.actions.shape[1]
     accumulated: dict[str, list[float]] = {}
@@ -147,16 +154,32 @@ def update_ppo(
         permutation = torch.randperm(num_envs, generator=generator, device=rollout.actions.device)
         for start in range(0, num_envs, config.minibatch_envs):
             indices = permutation[start : start + config.minibatch_envs]
-            losses = ppo_losses(model, rollout, config, indices)
+            losses = ppo_losses(
+                model,
+                rollout,
+                config,
+                indices,
+                capture_cbp=continual_backprop is not None,
+            )
             optimizer.zero_grad(set_to_none=True)
             losses["total"].backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
             optimizer.step()
+            if continual_backprop is not None:
+                continual_backprop.step(model.cbp_feature_stats())
+                recurrent = continual_backprop.last_gru_indices
+                if recurrent.numel():
+                    rollout.initial_hidden[:, recurrent] = 0.0
+                    rollout.next_hidden[:, recurrent] = 0.0
             values = {name: value.detach().item() for name, value in losses.items()}
             values["grad_norm"] = float(grad_norm)
             for name, value in values.items():
                 accumulated.setdefault(name, []).append(value)
-    return {name: float(sum(values) / len(values)) for name, values in accumulated.items()}
+    result = {name: float(sum(values) / len(values)) for name, values in accumulated.items()}
+    if continual_backprop is not None:
+        for name, count in continual_backprop.totals().items():
+            result[f"cbp_total_replacements_{name}"] = float(count)
+    return result
 
 
 @torch.no_grad()

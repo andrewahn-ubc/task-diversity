@@ -17,7 +17,8 @@ choices:
 - deterministic global unary and binary object rules shared by all phases;
 - 1,024 disjoint depth-6 topology families generated once, round-robin
   assigned to `d1` through `d4`, and nested at depths 1 through 6;
-- recurrent convolutional PPO without Continual Backprop;
+- recurrent convolutional PPO with Continual Backprop (CBP) applied to both
+  convolutional feature layers, the pre-GRU layer, and GRU hidden features;
 - 25,165,824 environment steps per phase (192 complete PPO rollouts), 1,024
   vector environments, and 1,024 independent evaluation episodes per curve
   point.
@@ -36,6 +37,50 @@ rollouts, 2 epochs, environment-sequence minibatches, Adam at `2.5e-4`,
 `gamma=0.99`, GAE `lambda=0.95`, clip `0.2`, value coefficient `0.5`, entropy
 coefficient `0.01`, and gradient-norm clipping at `0.5`. Recurrent state is
 reset at episode boundaries and minibatches preserve whole rollout sequences.
+
+## Continual Backprop
+
+The generate-and-test rule is adapted from Dohare et al.'s official
+[`loss-of-plasticity`](https://github.com/shibhansh/loss-of-plasticity)
+implementation at commit
+`a6b79580d85f3025bdb601566d3627c5f489f13b`. That implementation provides
+feed-forward `GnT`, convolutional `ConvGnT`, PPO integration, and an Adam
+variant with element-wise step counters. It does not provide a recurrent or
+GRU implementation, so this repository extends the same feature-replacement
+invariant to the recurrent state instead of leaving the largest shared feature
+layer uncontrolled.
+
+After every PPO optimizer minibatch, CBP updates exponential-moving-average
+contribution utility and replaces the lowest-utility mature features. The
+fixed settings are replacement rate `1e-4`, utility decay `0.99`, and maturity
+threshold `100` optimizer minibatches. The threshold is the official
+`ConvGnT` default and is low enough that CBP is active in the reduced pilot;
+replacement counts are recorded per layer.
+
+For a convolutional or linear feature, replacement reinitializes incoming
+weights at their original initialization norm, zeros the incoming bias and all
+outgoing weights, and clears the corresponding Adam first moment, second
+moment, and element-wise bias-correction age. Convolution-to-linear utility is
+computed at every spatial position before reducing to a channel utility, as in
+the official convolutional implementation. For pre-GRU linear features, the
+outgoing GRU bias is adjusted by the feature's bias-corrected mean activation
+before its outgoing weights are cleared.
+
+A GRU hidden feature is one recurrent block: the corresponding row in each of
+the reset, update, and new gates is reinitialized for both input and recurrent
+weights; the corresponding recurrent column and policy/value-head columns are
+zeroed; affected biases and Adam state are reset; and the matching live hidden
+state is cleared. Bias compensation is applied to unaffected recurrent gates
+and the two heads before the outgoing columns are cleared. Because recurrent
+rows and columns intersect, outgoing columns are zeroed after row generation,
+including the new feature's self-connection. This recurrent extension is a
+documented implementation choice, not code released or validated by the
+Banyan or CBP authors.
+
+CBP is a direct control for conventional loss of plasticity: if the plateau
+persists while replacements are active, that explanation becomes less likely.
+It does not by itself prove that any remaining plateau is caused by gradient
+interference; the gradient analysis remains correlational.
 
 ## Phase measurements
 
@@ -63,5 +108,7 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
 32GB RAM, and 10 hours. The 15 primary conditions are a SLURM array, so elapsed
 time is governed by one run rather than the sum of all seeds when capacity is
-available. Smoke jobs request one hour. The maximum requested time remains far
-below Narval's 168-hour limit.
+available. The smoke array requests four hours and runs one full-budget phase
+for each seed-0 condition. Those three checkpoints are the corresponding main
+runs, so successful smoke computation is reused rather than discarded. The
+maximum requested time remains far below Narval's 168-hour limit.

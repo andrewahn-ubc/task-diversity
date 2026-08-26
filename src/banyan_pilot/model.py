@@ -56,11 +56,19 @@ class RecurrentActorCritic(nn.Module):
                 nn.init.orthogonal_(parameter, 1.0)
         self.actor = _layer_init(nn.Linear(hidden_size, ACTION_COUNT), std=0.01)
         self.critic = _layer_init(nn.Linear(hidden_size, 1), std=1.0)
+        self._last_cbp_stats: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
     def initial_hidden(self, batch_size: int, device: torch.device) -> torch.Tensor:
         return torch.zeros((batch_size, self.hidden_size), device=device)
 
-    def _encode(self, obs: CompactObs) -> torch.Tensor:
+    @staticmethod
+    def _feature_summary(
+        features: torch.Tensor, dimensions: tuple[int, ...]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        detached = features.detach()
+        return detached.mean(dim=dimensions), detached.abs().mean(dim=dimensions)
+
+    def _encode(self, obs: CompactObs, *, capture_cbp: bool = False) -> torch.Tensor:
         batch = obs.objects.shape[0]
         valid = obs.objects >= 0
         ids = obs.objects.clamp(min=0)
@@ -76,7 +84,9 @@ class RecurrentActorCritic(nn.Module):
         object_present = valid.float()[:, None]
         walls = self.walls.expand(batch, -1, -1, -1)
         grid = torch.cat((walls, agent_grid, object_present, object_grid), dim=1)
-        encoded_grid = self.encoder(grid)
+        conv1 = self.encoder[1](self.encoder[0](grid))
+        conv2 = self.encoder[3](self.encoder[2](conv1))
+        encoded_grid = self.encoder[4](conv2)
         goal = self.object_feature_table[obs.goal]
         held_valid = obs.held >= 0
         held = self.object_feature_table[obs.held.clamp(min=0)] * held_valid[:, None]
@@ -90,7 +100,22 @@ class RecurrentActorCritic(nn.Module):
             ),
             dim=1,
         )
-        return self.pre_gru(torch.cat((encoded_grid, extras), dim=1))
+        pre_gru = self.pre_gru(torch.cat((encoded_grid, extras), dim=1))
+        if capture_cbp:
+            conv2_flat = conv2.detach().flatten(2)
+            self._last_cbp_stats = {
+                "conv1": self._feature_summary(conv1, (0, 2, 3)),
+                # Preserve the spatial axis for the Conv2d -> Linear utility.
+                # The official ConvGnT implementation weights every flattened
+                # activation by its own outgoing-weight magnitude before
+                # reducing to one utility per channel.
+                "conv2": (
+                    conv2_flat.mean(dim=0),
+                    conv2_flat.abs().mean(dim=0),
+                ),
+                "pre_gru": self._feature_summary(pre_gru, (0,)),
+            }
+        return pre_gru
 
     def forward_step(
         self, obs: CompactObs, hidden: torch.Tensor, episode_start: torch.Tensor
@@ -128,6 +153,8 @@ class RecurrentActorCritic(nn.Module):
         initial_hidden: torch.Tensor,
         episode_starts: torch.Tensor,
         actions: torch.Tensor,
+        *,
+        capture_cbp: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         logprobs: list[torch.Tensor] = []
         entropies: list[torch.Tensor] = []
@@ -137,17 +164,31 @@ class RecurrentActorCritic(nn.Module):
         flat_obs = CompactObs(
             *(value.reshape(time_steps * batch_size, *value.shape[2:]) for value in obs.as_tuple())
         )
-        encoded = self._encode(flat_obs).reshape(time_steps, batch_size, self.hidden_size)
+        encoded = self._encode(flat_obs, capture_cbp=capture_cbp).reshape(
+            time_steps, batch_size, self.hidden_size
+        )
+        hidden_features: list[torch.Tensor] = []
         for step in range(time_steps):
             hidden = hidden * (~episode_starts[step].bool()).float()[:, None]
             hidden = self.gru(encoded[step], hidden)
+            if capture_cbp:
+                hidden_features.append(hidden)
             logits = self.actor(hidden)
             value = self.critic(hidden).squeeze(-1)
             distribution = Categorical(logits=logits)
             logprobs.append(distribution.log_prob(actions[step]))
             entropies.append(distribution.entropy())
             values.append(value)
+        if capture_cbp:
+            recurrent = torch.stack(hidden_features)
+            self._last_cbp_stats["gru"] = self._feature_summary(recurrent, (0, 1))
         return torch.stack(logprobs), torch.stack(entropies), torch.stack(values)
+
+    def cbp_feature_stats(self) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+        expected = {"conv1", "conv2", "pre_gru", "gru"}
+        if set(self._last_cbp_stats) != expected:
+            raise RuntimeError("CBP feature statistics were not captured by the latest PPO pass")
+        return self._last_cbp_stats
 
     def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
         shared = list(self.encoder.parameters()) + list(self.pre_gru.parameters()) + list(

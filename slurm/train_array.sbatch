@@ -32,10 +32,12 @@ DIVERSITIES=(1 16 256)
 if [[ "${BANYAN_MODE:?}" == "smoke" ]]; then
   DIVERSITY="${DIVERSITIES[$SLURM_ARRAY_TASK_ID]}"
   SEED=0
+  EXTRA_TRAIN_ARGS=(--stop-after-distributions 1)
 else
   DIVERSITY_INDEX=$((SLURM_ARRAY_TASK_ID / 5))
   SEED=$((SLURM_ARRAY_TASK_ID % 5))
   DIVERSITY="${DIVERSITIES[$DIVERSITY_INDEX]}"
+  EXTRA_TRAIN_ARGS=()
 fi
 
 set +e
@@ -44,7 +46,8 @@ srun --ntasks=1 python -m banyan_pilot.train \
   --diversity "$DIVERSITY" \
   --seed "$SEED" \
   --output-root "${BANYAN_OUTPUT:?}" \
-  --device cuda
+  --device cuda \
+  "${EXTRA_TRAIN_ARGS[@]}"
 STATUS=$?
 set -e
 

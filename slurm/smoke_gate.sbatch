@@ -15,4 +15,7 @@ module --force purge
 module load StdEnv/2023 python/3.11
 source "$REPO_ROOT/.venv-narval/bin/activate"
 export PYTHONPATH="$REPO_ROOT/src"
-python -m banyan_pilot.smoke_gate --root results/smoke --output results/smoke/gate.json
+python -m banyan_pilot.smoke_gate \
+  --config configs/main.toml \
+  --root results/raw-cbp \
+  --output results/raw-cbp/smoke-gate.json

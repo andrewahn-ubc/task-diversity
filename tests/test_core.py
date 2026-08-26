@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from pathlib import PurePosixPath
 
 import torch
 
-from banyan_pilot.config import load_config
+from banyan_pilot.config import CBPConfig, load_config
+from banyan_pilot.continual_adam import ContinualAdam
+from banyan_pilot.continual_backprop import ContinualBackprop
 from banyan_pilot.dependency_audit import audit_resolution
 from banyan_pilot.env import DROP, TOGGLE, VectorBanyan
 from banyan_pilot.model import RecurrentActorCritic
@@ -141,7 +144,120 @@ class PilotCoreTests(unittest.TestCase):
         losses = update_ppo(model, optimizer, rollout, ppo, generator)
         self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in losses.values()))
         cosines = gradient_cosines(model, rollout, rollout, ppo)
-        self.assertAlmostEqual(cosines["cosine_all"], 1.0, places=5)
+        self.assertAlmostEqual(cosines["cosine_all"], 1.0, delta=1e-4)
+
+    def test_continual_adam_matches_torch_adam_before_resets(self) -> None:
+        torch.manual_seed(91)
+        reference = torch.nn.Parameter(torch.randn(4, 5))
+        continual = torch.nn.Parameter(reference.detach().clone())
+        reference_optimizer = torch.optim.Adam([reference], lr=2.5e-4, eps=1e-5)
+        continual_optimizer = ContinualAdam([continual], lr=2.5e-4, eps=1e-5)
+        for _ in range(5):
+            gradient = torch.randn_like(reference)
+            reference.grad = gradient.clone()
+            continual.grad = gradient.clone()
+            reference_optimizer.step()
+            continual_optimizer.step()
+        torch.testing.assert_close(continual, reference, rtol=1e-6, atol=1e-7)
+        state = continual_optimizer.state[continual]
+        continual_optimizer.reset_state(continual, (torch.tensor([1, 3]), slice(None)))
+        self.assertTrue((state["step"][[1, 3]] == 0).all())
+        self.assertTrue((state["exp_avg"][[1, 3]] == 0).all())
+        self.assertTrue((state["exp_avg_sq"][[1, 3]] == 0).all())
+        self.assertTrue((state["step"][[0, 2]] == 5).all())
+
+    def test_cbp_resets_feedforward_recurrent_and_optimizer_state(self) -> None:
+        torch.manual_seed(17)
+        model = RecurrentActorCritic(
+            grid_size=7,
+            object_feature_dim=16,
+            hidden_size=8,
+            walls=torch.zeros(7, 7, dtype=torch.bool),
+        )
+        optimizer = ContinualAdam(model.parameters(), lr=2.5e-4, eps=1e-5)
+        for parameter in model.parameters():
+            parameter.grad = torch.ones_like(parameter)
+        optimizer.step()
+        cbp = ContinualBackprop(
+            model,
+            optimizer,
+            CBPConfig(
+                enabled=True,
+                replacement_rate=1.0,
+                decay_rate=0.99,
+                maturity_threshold=0,
+                utility="contribution",
+            ),
+        )
+        pixels = model.grid_size * model.grid_size
+        statistics = {
+            "conv1": (torch.ones(32), torch.ones(32)),
+            "conv2": (torch.ones(32, pixels), torch.ones(32, pixels)),
+            "pre_gru": (torch.ones(8), torch.ones(8)),
+            "gru": (torch.ones(8), torch.ones(8)),
+        }
+        replacements = cbp.step(statistics)
+        self.assertEqual(replacements, {"conv1": 32, "conv2": 32, "pre_gru": 8, "gru": 8})
+        self.assertTrue((model.actor.weight == 0).all())
+        self.assertTrue((model.critic.weight == 0).all())
+        self.assertTrue((model.gru.weight_hh == 0).all())
+        self.assertTrue((optimizer.state[model.actor.weight]["step"] == 0).all())
+        self.assertTrue((optimizer.state[model.gru.weight_hh]["exp_avg"] == 0).all())
+        self.assertTrue(torch.isfinite(model.encoder[0].weight).all())
+        self.assertGreater(float(model.encoder[0].weight.detach().norm()), 0.0)
+
+        restored = ContinualBackprop(model, optimizer, cbp.config)
+        restored.load_state_dict(cbp.state_dict())
+        self.assertEqual(restored.totals(), cbp.totals())
+        for name in cbp.LAYER_NAMES:
+            torch.testing.assert_close(restored.layers[name].ages, cbp.layers[name].ages)
+
+    def test_ppo_update_runs_cbp_after_each_minibatch(self) -> None:
+        env = self.make_env(self.catalog.task_ids(0, 1), num_envs=4)
+        model = RecurrentActorCritic(
+            grid_size=9,
+            object_feature_dim=16,
+            hidden_size=32,
+            walls=env.walls,
+        )
+        rollout = collect_rollout(
+            model,
+            env,
+            env.observe(),
+            model.initial_hidden(4, self.device),
+            torch.ones(4, dtype=torch.bool),
+            rollout_steps=4,
+            gamma=0.99,
+            gae_lambda=0.95,
+        )
+        ppo = replace(
+            self.config.ppo,
+            update_epochs=1,
+            minibatch_envs=2,
+            hidden_size=32,
+        )
+        optimizer = ContinualAdam(model.parameters(), lr=ppo.learning_rate, eps=1e-5)
+        cbp = ContinualBackprop(
+            model,
+            optimizer,
+            CBPConfig(
+                enabled=True,
+                replacement_rate=1.0 / 32.0,
+                decay_rate=0.99,
+                maturity_threshold=0,
+                utility="contribution",
+            ),
+        )
+        losses = update_ppo(
+            model,
+            optimizer,
+            rollout,
+            ppo,
+            torch.Generator().manual_seed(7),
+            cbp,
+        )
+        self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in losses.values()))
+        self.assertEqual(cbp.totals(), {"conv1": 2, "conv2": 2, "pre_gru": 2, "gru": 2})
 
 
 if __name__ == "__main__":

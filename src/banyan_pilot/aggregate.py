@@ -67,8 +67,18 @@ def collect(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], lis
     for diversity in DIVERSITIES:
         for seed in SEEDS:
             run_dir = root / f"n{diversity}" / f"seed_{seed}"
-            if not (run_dir / "completed.json").exists():
+            completed_path = run_dir / "completed.json"
+            if not completed_path.exists():
                 raise RuntimeError(f"Missing completed run: {run_dir}")
+            completed = json.loads(completed_path.read_text(encoding="utf-8"))
+            replacement_totals = completed.get("cbp_total_replacements")
+            expected_layers = {"conv1", "conv2", "pre_gru", "gru"}
+            if completed.get("algorithm") != "ppo_cbp" or (
+                not isinstance(replacement_totals, dict)
+                or set(replacement_totals) != expected_layers
+                or any(int(replacement_totals[layer]) <= 0 for layer in expected_layers)
+            ):
+                raise RuntimeError(f"Run is not a verified PPO + CBP result: {run_dir}")
             metrics = read_jsonl(run_dir / "metrics.jsonl")
             evaluations = [record for record in metrics if record.get("event") == "evaluation"]
             backward = [record for record in metrics if record.get("event") == "backward_evaluation"]
@@ -385,9 +395,9 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         "## Exact setup",
         "",
-        "A recurrent PPO agent trained sequentially on four disjoint topology distributions at n = 1, 16, and 256, with five matched seeds. Each phase used 25,165,824 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
+        "A recurrent PPO + Continual Backprop (CBP) agent trained sequentially on four disjoint topology distributions at n = 1, 16, and 256, with five matched seeds. Each phase used 25,165,824 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, CBP configuration, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
         "",
-        "The official Banyan code was not public when this repository was created. This clean-room reduced implementation uses plain PPO rather than PPO + Continual Backprop. It therefore does not independently exclude conventional loss of plasticity.",
+        "The official Banyan code was not public when this repository was created. The CBP generate-and-test rule and element-wise Adam-state reset are adapted from Dohare et al.'s official implementation. This repository applies them to every learned feature layer and adds a documented GRU extension. A plateau that persists under this intervention is less consistent with conventional loss of plasticity, although CBP cannot logically eliminate every plasticity-related explanation.",
         "",
         "## Effect sizes (mean across seeds, 95% CI)",
         "",
@@ -418,7 +428,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             "",
             "- The environment is a documented reduced reconstruction because the authors' implementation and full hyperparameters were unavailable.",
             "- Only topology diversity is varied, the sequence has four rather than ten distributions, and the phase budget is much smaller than the paper's 100M steps.",
-            "- Plain PPO does not rule out loss of plasticity as an alternative account.",
+            "- The official CBP code supports feed-forward networks; the GRU feature-block extension here is necessary for the recurrent policy but has not been validated by the Banyan or CBP authors.",
+            "- CBP actively mitigates loss of plasticity but cannot prove that every residual plateau is caused only by gradient interference.",
             "- Gradient conflict is observational; it cannot establish that interference causes stalled specialization.",
             "",
             "## Recommendation",
@@ -433,8 +444,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="results/raw")
-    parser.add_argument("--output", default="results")
+    parser.add_argument("--root", default="results/raw-cbp")
+    parser.add_argument("--output", default="results/cbp")
     args = parser.parse_args()
     output = Path(args.output)
     phase_rows, diagnostic_rows, curve_rows = collect(Path(args.root))

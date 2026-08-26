@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib.metadata
 import json
 import os
@@ -14,6 +15,8 @@ import numpy as np
 import torch
 
 from .config import load_config
+from .continual_adam import ContinualAdam
+from .continual_backprop import ContinualBackprop
 from .env import VectorBanyan
 from .model import RecurrentActorCritic
 from .taskgen import build_catalog
@@ -102,23 +105,49 @@ def run_preflight(
         raise RuntimeError("Environment observation shape check failed")
     if not torch.isfinite(reward).all() or done.shape != (8,):
         raise RuntimeError("Environment step check failed")
-    if require_cuda:
-        probe_model = RecurrentActorCritic(
-            grid_size=config.environment.grid_size,
-            object_feature_dim=config.environment.object_feature_dim,
-            hidden_size=32,
-            walls=probe_env.walls,
-        ).to(device)
-        logits, values, hidden = probe_model.forward_step(
-            obs,
-            probe_model.initial_hidden(8, device),
-            torch.ones(8, dtype=torch.bool, device=device),
+    probe_model = RecurrentActorCritic(
+        grid_size=config.environment.grid_size,
+        object_feature_dim=config.environment.object_feature_dim,
+        hidden_size=32,
+        walls=probe_env.walls,
+    ).to(device)
+    logits, values, hidden = probe_model.forward_step(
+        obs,
+        probe_model.initial_hidden(8, device),
+        torch.ones(8, dtype=torch.bool, device=device),
+    )
+    probe_loss = logits.square().mean() + values.square().mean() + hidden.square().mean()
+    probe_optimizer = ContinualAdam(
+        probe_model.parameters(), lr=config.ppo.learning_rate, eps=1e-5
+    )
+    probe_loss.backward()
+    probe_optimizer.step()
+    cbp_probe_ok = False
+    if config.cbp.enabled:
+        probe_cbp = ContinualBackprop(
+            probe_model,
+            probe_optimizer,
+            dataclasses.replace(
+                config.cbp, replacement_rate=1.0, maturity_threshold=0
+            ),
         )
-        probe_loss = logits.square().mean() + values.square().mean() + hidden.square().mean()
-        probe_loss.backward()
+        probe_stats = {
+            "conv1": (torch.ones(32, device=device), torch.ones(32, device=device)),
+            "conv2": (
+                torch.ones(32, config.environment.grid_size**2, device=device),
+                torch.ones(32, config.environment.grid_size**2, device=device),
+            ),
+            "pre_gru": (torch.ones(32, device=device), torch.ones(32, device=device)),
+            "gru": (torch.ones(32, device=device), torch.ones(32, device=device)),
+        }
+        expected_replacements = {"conv1": 32, "conv2": 32, "pre_gru": 32, "gru": 32}
+        if probe_cbp.step(probe_stats) != expected_replacements:
+            raise RuntimeError("PPO + CBP optimizer/reset probe failed")
+        cbp_probe_ok = True
+    if require_cuda:
         torch.cuda.synchronize(device)
-        if not torch.isfinite(probe_loss):
-            raise RuntimeError("CUDA convolution/GRU/autograd probe returned a non-finite loss")
+    if not torch.isfinite(probe_loss):
+        raise RuntimeError("Convolution/GRU/PPO optimizer probe returned a non-finite loss")
     payload: dict[str, Any] = {
         "status": "ok",
         "python": platform.python_version(),
@@ -139,6 +168,8 @@ def run_preflight(
         "gpu_capability": torch.cuda.get_device_capability(device) if require_cuda else None,
         "torch_arch_list": torch.cuda.get_arch_list() if require_cuda else None,
         "cudnn_version": torch.backends.cudnn.version() if require_cuda else None,
+        "cbp_enabled": config.cbp.enabled,
+        "cbp_optimizer_reset_probe": cbp_probe_ok,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
     }
     return payload

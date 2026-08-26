@@ -11,8 +11,8 @@ documentation.
   environments are blocked.
 - GPU nodes expose four 40GB NVIDIA A100 SXM4 GPUs. A full device is requested
   with `--gpus=a100:1`.
-- Narval permits jobs up to 168 hours. The pilot requests 1 hour for smoke
-  jobs and 10 hours for primary runs.
+- Narval permits jobs up to 168 hours. The first-phase pilot jobs request 4
+  hours and the resumable primary runs request 10 hours.
 
 Source: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en).
 
@@ -83,8 +83,9 @@ these pass:
    build;
 6. CPU imports and a deterministic 6,144-task catalog/environment probe; and
 7. on every allocated GPU, CUDA availability, A100 `sm_80` kernel support,
-   catalog disjointness, an environment step, and a real convolution/GRU
-   forward-and-backward pass followed by CUDA synchronization.
+   catalog disjointness, an environment step, a real convolution/GRU
+   forward-and-backward pass, one custom Adam step, forced CBP replacements in
+   every controlled layer, and CUDA synchronization.
 
 The resolution report, installed metadata, freeze, pip configuration, and
 login-node audit are saved under `results/environment/`; the CUDA audit appears

@@ -15,6 +15,8 @@ import numpy as np
 import torch
 
 from .config import Config, load_config
+from .continual_adam import ContinualAdam
+from .continual_backprop import ContinualBackprop
 from .env import CompactObs, VectorBanyan
 from .model import RecurrentActorCritic
 from .ppo import collect_rollout, evaluate_policy, gradient_cosines, update_ppo
@@ -111,9 +113,18 @@ class Trainer:
             hidden_size=config.ppo.hidden_size,
             walls=self.env.walls,
         ).to(device)
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=config.ppo.learning_rate, eps=1e-5
-        )
+        if config.cbp.enabled:
+            self.optimizer: torch.optim.Optimizer = ContinualAdam(
+                self.model.parameters(), lr=config.ppo.learning_rate, eps=1e-5
+            )
+            self.continual_backprop: ContinualBackprop | None = ContinualBackprop(
+                self.model, self.optimizer, config.cbp
+            )
+        else:
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(), lr=config.ppo.learning_rate, eps=1e-5
+            )
+            self.continual_backprop = None
         self.update_generator = torch.Generator(device=device)
         self.update_generator.manual_seed(env_seed + 31)
         self.phase = 0
@@ -278,6 +289,11 @@ class Trainer:
             "update_index": self.update_index,
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
+            "continual_backprop": (
+                self.continual_backprop.state_dict()
+                if self.continual_backprop is not None
+                else None
+            ),
             "env": self.env.state_dict(),
             "obs": tuple(value.cpu() for value in self.obs.as_tuple()),
             "hidden": self.hidden.cpu(),
@@ -320,6 +336,12 @@ class Trainer:
         self.update_index = checkpoint["update_index"]
         self.model.load_state_dict(checkpoint["model"])
         self.optimizer.load_state_dict(checkpoint["optimizer"])
+        if self.continual_backprop is not None:
+            if checkpoint.get("continual_backprop") is None:
+                raise RuntimeError("CBP checkpoint state is missing")
+            self.continual_backprop.load_state_dict(checkpoint["continual_backprop"])
+        elif checkpoint.get("continual_backprop") is not None:
+            raise RuntimeError("Unexpected CBP state in a plain-PPO checkpoint")
         self.env.load_state_dict(checkpoint["env"])
         self.obs = CompactObs(*(value.to(self.device) for value in checkpoint["obs"]))
         self.hidden = checkpoint["hidden"].to(self.device)
@@ -341,6 +363,7 @@ class Trainer:
             "diversity": self.diversity,
             "seed": self.seed,
             "device": str(self.device),
+            "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
             "torch_version": torch.__version__,
             "cuda_version": torch.version.cuda,
             "gpu": torch.cuda.get_device_name(self.device) if self.device.type == "cuda" else None,
@@ -350,8 +373,14 @@ class Trainer:
         }
         _json_dump(self.run_dir / "run.json", payload)
 
-    def run(self) -> int:
+    def run(self, *, stop_after_distributions: int | None = None) -> int:
         if self.completed_path.exists():
+            completed = json.loads(self.completed_path.read_text(encoding="utf-8"))
+            if completed.get("config_fingerprint") != self.config.fingerprint():
+                raise RuntimeError(
+                    f"Completed run at {self.run_dir} belongs to a different configuration; "
+                    "use a new output root and preserve the existing result"
+                )
             print(f"Run already complete: {self.completed_path}", flush=True)
             return 0
         resumed = self.load_checkpoint()
@@ -363,7 +392,15 @@ class Trainer:
             raise ValueError(
                 f"steps_per_distribution={target} must be divisible by rollout batch={batch_steps}"
             )
-        while self.phase < self.config.experiment.num_distributions:
+        phase_limit = self.config.experiment.num_distributions
+        if stop_after_distributions is not None:
+            if not 1 <= stop_after_distributions <= phase_limit:
+                raise ValueError(
+                    "stop_after_distributions must be between 1 and "
+                    f"{phase_limit}, got {stop_after_distributions}"
+                )
+            phase_limit = stop_after_distributions
+        while self.phase < phase_limit:
             phase = self.phase
             if self.phase_steps == 0:
                 self.env.set_task_pool(self.catalog.task_ids(phase, self.diversity))
@@ -393,6 +430,7 @@ class Trainer:
                     rollout,
                     self.config.ppo,
                     self.update_generator,
+                    self.continual_backprop,
                 )
                 self.obs = rollout.next_obs
                 self.hidden = rollout.next_hidden.detach()
@@ -430,6 +468,29 @@ class Trainer:
             self.phase += 1
             self.phase_steps = 0
             self.save_checkpoint()
+        if self.phase < self.config.experiment.num_distributions:
+            pilot = {
+                "status": "pilot_complete",
+                "completed_distributions": self.phase,
+                "seed": self.seed,
+                "diversity": self.diversity,
+                "total_env_steps": self.total_steps,
+                "wall_time_seconds": time.time() - self.started_at,
+                "config_fingerprint": self.config.fingerprint(),
+                "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
+                "cbp_total_replacements": (
+                    self.continual_backprop.totals()
+                    if self.continual_backprop is not None
+                    else None
+                ),
+            }
+            _json_dump(self.run_dir / "pilot_complete.json", pilot)
+            print(
+                f"Pilot checkpoint complete after {self.phase} distribution(s): "
+                f"{self.run_dir}",
+                flush=True,
+            )
+            return 0
         completed = {
             "status": "complete",
             "seed": self.seed,
@@ -437,6 +498,12 @@ class Trainer:
             "total_env_steps": self.total_steps,
             "wall_time_seconds": time.time() - self.started_at,
             "config_fingerprint": self.config.fingerprint(),
+            "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
+            "cbp_total_replacements": (
+                self.continual_backprop.totals()
+                if self.continual_backprop is not None
+                else None
+            ),
         }
         _json_dump(self.completed_path, completed)
         return 0
@@ -450,6 +517,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--override-steps", type=int)
+    parser.add_argument("--stop-after-distributions", type=int)
     return parser.parse_args()
 
 
@@ -484,7 +552,7 @@ def main() -> int:
         output_root=output_root,
         device=device,
     )
-    return trainer.run()
+    return trainer.run(stop_after_distributions=args.stop_after_distributions)
 
 
 if __name__ == "__main__":
