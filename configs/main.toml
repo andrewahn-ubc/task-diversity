@@ -1,0 +1,38 @@
+[experiment]
+diversities = [1, 16, 256]
+seeds = [0, 1, 2, 3, 4]
+num_distributions = 4
+task_seed = 260600880
+steps_per_distribution = 25165824
+eval_interval_steps = 1048576
+eval_episodes = 1024
+diagnostic_fractions = [0.0, 0.5, 1.0]
+output_root = "results/raw"
+
+[environment]
+grid_size = 9
+max_depth = 6
+min_depth = 1
+max_leaves = 7
+object_feature_dim = 16
+max_episode_steps = 192
+num_envs = 1024
+
+[ppo]
+rollout_steps = 128
+update_epochs = 2
+minibatch_envs = 128
+learning_rate = 0.00025
+gamma = 0.99
+gae_lambda = 0.95
+clip_coef = 0.2
+value_coef = 0.5
+entropy_coef = 0.01
+max_grad_norm = 0.5
+hidden_size = 256
+checkpoint_interval_updates = 20
+
+[diagnostics]
+num_envs = 256
+rollout_steps = 128
+eval_episodes = 512

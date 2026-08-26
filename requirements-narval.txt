@@ -1,0 +1,5 @@
+# Top-level dependencies only.  Transitive versions are captured in
+# results/environment/pip-freeze.txt when the Narval environment is created.
+torch==2.6.0
+numpy==1.26.4
+matplotlib==3.9.2

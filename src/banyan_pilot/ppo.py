@@ -1,0 +1,267 @@
+from __future__ import annotations
+
+import dataclasses
+from typing import Any
+
+import torch
+
+from .config import PPOConfig
+from .env import CompactObs, VectorBanyan, stack_observations
+from .model import RecurrentActorCritic
+
+
+@dataclasses.dataclass
+class Rollout:
+    obs: CompactObs
+    actions: torch.Tensor
+    logprobs: torch.Tensor
+    rewards: torch.Tensor
+    dones: torch.Tensor
+    episode_starts: torch.Tensor
+    values: torch.Tensor
+    advantages: torch.Tensor
+    returns: torch.Tensor
+    initial_hidden: torch.Tensor
+    next_obs: CompactObs
+    next_episode_start: torch.Tensor
+    next_hidden: torch.Tensor
+
+
+@torch.no_grad()
+def collect_rollout(
+    model: RecurrentActorCritic,
+    env: VectorBanyan,
+    obs: CompactObs,
+    hidden: torch.Tensor,
+    episode_start: torch.Tensor,
+    *,
+    rollout_steps: int,
+    gamma: float,
+    gae_lambda: float,
+) -> Rollout:
+    observations: list[CompactObs] = []
+    actions: list[torch.Tensor] = []
+    logprobs: list[torch.Tensor] = []
+    rewards: list[torch.Tensor] = []
+    dones: list[torch.Tensor] = []
+    starts: list[torch.Tensor] = []
+    values: list[torch.Tensor] = []
+    initial_hidden = hidden.clone()
+    for _ in range(rollout_steps):
+        observations.append(obs.clone())
+        starts.append(episode_start.clone())
+        action, logprob, _, value, next_hidden = model.act(obs, hidden, episode_start)
+        next_obs, reward, done, _ = env.step(action)
+        actions.append(action)
+        logprobs.append(logprob)
+        rewards.append(reward)
+        dones.append(done)
+        values.append(value)
+        obs, hidden, episode_start = next_obs, next_hidden, done
+    _, next_value, _ = model.forward_step(obs, hidden, episode_start)
+    reward_tensor = torch.stack(rewards)
+    done_tensor = torch.stack(dones)
+    value_tensor = torch.stack(values)
+    advantages = torch.zeros_like(reward_tensor)
+    last_gae = torch.zeros(env.num_envs, device=reward_tensor.device)
+    for step in reversed(range(rollout_steps)):
+        if step == rollout_steps - 1:
+            next_nonterminal = (~done_tensor[step]).float()
+            following_value = next_value
+        else:
+            next_nonterminal = (~done_tensor[step]).float()
+            following_value = value_tensor[step + 1]
+        delta = reward_tensor[step] + gamma * following_value * next_nonterminal - value_tensor[step]
+        last_gae = delta + gamma * gae_lambda * next_nonterminal * last_gae
+        advantages[step] = last_gae
+    returns = advantages + value_tensor
+    return Rollout(
+        obs=stack_observations(observations),
+        actions=torch.stack(actions),
+        logprobs=torch.stack(logprobs),
+        rewards=reward_tensor,
+        dones=done_tensor,
+        episode_starts=torch.stack(starts),
+        values=value_tensor,
+        advantages=advantages,
+        returns=returns,
+        initial_hidden=initial_hidden,
+        next_obs=obs,
+        next_episode_start=episode_start,
+        next_hidden=hidden,
+    )
+
+
+def _slice_envs(obs: CompactObs, indices: torch.Tensor) -> CompactObs:
+    return CompactObs(*(value[:, indices] for value in obs.as_tuple()))
+
+
+def ppo_losses(
+    model: RecurrentActorCritic,
+    rollout: Rollout,
+    config: PPOConfig,
+    env_indices: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    if env_indices is None:
+        env_indices = torch.arange(rollout.actions.shape[1], device=rollout.actions.device)
+    new_logprobs, entropy, new_values = model.evaluate_sequence(
+        _slice_envs(rollout.obs, env_indices),
+        rollout.initial_hidden[env_indices],
+        rollout.episode_starts[:, env_indices],
+        rollout.actions[:, env_indices],
+    )
+    old_logprobs = rollout.logprobs[:, env_indices]
+    advantages = rollout.advantages[:, env_indices]
+    advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
+    ratio = (new_logprobs - old_logprobs).exp()
+    policy_unclipped = -advantages * ratio
+    policy_clipped = -advantages * torch.clamp(
+        ratio, 1.0 - config.clip_coef, 1.0 + config.clip_coef
+    )
+    policy_loss = torch.maximum(policy_unclipped, policy_clipped).mean()
+    value_loss = 0.5 * (new_values - rollout.returns[:, env_indices]).square().mean()
+    entropy_loss = entropy.mean()
+    total = policy_loss + config.value_coef * value_loss - config.entropy_coef * entropy_loss
+    approx_kl = ((ratio - 1.0) - (new_logprobs - old_logprobs)).mean()
+    clip_fraction = ((ratio - 1.0).abs() > config.clip_coef).float().mean()
+    return {
+        "total": total,
+        "policy": policy_loss,
+        "value": value_loss,
+        "entropy": entropy_loss,
+        "approx_kl": approx_kl,
+        "clip_fraction": clip_fraction,
+    }
+
+
+def update_ppo(
+    model: RecurrentActorCritic,
+    optimizer: torch.optim.Optimizer,
+    rollout: Rollout,
+    config: PPOConfig,
+    generator: torch.Generator,
+) -> dict[str, float]:
+    num_envs = rollout.actions.shape[1]
+    accumulated: dict[str, list[float]] = {}
+    for _ in range(config.update_epochs):
+        permutation = torch.randperm(num_envs, generator=generator, device=rollout.actions.device)
+        for start in range(0, num_envs, config.minibatch_envs):
+            indices = permutation[start : start + config.minibatch_envs]
+            losses = ppo_losses(model, rollout, config, indices)
+            optimizer.zero_grad(set_to_none=True)
+            losses["total"].backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            optimizer.step()
+            values = {name: value.detach().item() for name, value in losses.items()}
+            values["grad_norm"] = float(grad_norm)
+            for name, value in values.items():
+                accumulated.setdefault(name, []).append(value)
+    return {name: float(sum(values) / len(values)) for name, values in accumulated.items()}
+
+
+@torch.no_grad()
+def evaluate_policy(
+    model: RecurrentActorCritic,
+    catalog_task_ids: torch.Tensor,
+    env_factory: Any,
+    *,
+    episodes: int,
+    seed: int,
+) -> dict[str, float]:
+    env: VectorBanyan = env_factory(catalog_task_ids, seed)
+    obs = env.observe()
+    hidden = model.initial_hidden(env.num_envs, env.device)
+    episode_start = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+    successes = 0
+    dead_ends = 0
+    timeouts = 0
+    completed = 0
+    depth_success = torch.zeros(7, dtype=torch.float64, device=env.device)
+    depth_count = torch.zeros(7, dtype=torch.float64, device=env.device)
+    action_generator = torch.Generator(device=env.device)
+    action_generator.manual_seed(seed + 99173)
+    while completed < episodes:
+        action, _, _, _, hidden = model.act(
+            obs,
+            hidden,
+            episode_start,
+            deterministic=False,
+            generator=action_generator,
+        )
+        obs, _, done, info = env.step(action)
+        finished = torch.nonzero(done, as_tuple=False).flatten()
+        if len(finished):
+            remaining = episodes - completed
+            finished = finished[:remaining]
+            success = info["success"][finished]
+            depths = info["depth"][finished]
+            successes += int(success.sum().item())
+            dead_ends += int(info["dead_end"][finished].sum().item())
+            timeouts += int(info["timeout"][finished].sum().item())
+            for depth in range(1, 7):
+                mask = depths == depth
+                depth_count[depth] += mask.sum()
+                depth_success[depth] += success[mask].sum()
+            completed += len(finished)
+        episode_start = done
+    result = {
+        "success_rate": successes / completed,
+        "dead_end_rate": dead_ends / completed,
+        "timeout_rate": timeouts / completed,
+        "episodes": completed,
+    }
+    for depth in range(1, 7):
+        denominator = max(1.0, float(depth_count[depth].item()))
+        result[f"success_depth_{depth}"] = float(depth_success[depth].item()) / denominator
+    return result
+
+
+def flattened_gradients(
+    loss: torch.Tensor,
+    parameters: list[torch.nn.Parameter],
+    *,
+    retain_graph: bool,
+) -> torch.Tensor:
+    gradients = torch.autograd.grad(
+        loss,
+        parameters,
+        retain_graph=retain_graph,
+        allow_unused=True,
+    )
+    pieces = [
+        torch.zeros_like(parameter).reshape(-1) if gradient is None else gradient.reshape(-1)
+        for parameter, gradient in zip(parameters, gradients)
+    ]
+    return torch.cat(pieces)
+
+
+def gradient_cosines(
+    model: RecurrentActorCritic,
+    current: Rollout,
+    previous: Rollout,
+    config: PPOConfig,
+) -> dict[str, float]:
+    current_loss = ppo_losses(model, current, config)["total"]
+    previous_loss = ppo_losses(model, previous, config)["total"]
+    groups = model.parameter_groups()
+    current_vectors: dict[str, torch.Tensor] = {}
+    previous_vectors: dict[str, torch.Tensor] = {}
+    names = list(groups)
+    for index, name in enumerate(names):
+        current_vectors[name] = flattened_gradients(
+            current_loss, groups[name], retain_graph=True
+        )
+        previous_vectors[name] = flattened_gradients(
+            previous_loss, groups[name], retain_graph=index < len(names) - 1
+        )
+    result: dict[str, float] = {}
+    for name in names:
+        left, right = current_vectors[name], previous_vectors[name]
+        denominator = left.norm() * right.norm()
+        cosine = torch.tensor(float("nan"), device=left.device)
+        if denominator.item() > 0:
+            cosine = torch.dot(left, right) / denominator
+        result[f"cosine_{name}"] = float(cosine.detach().cpu())
+        result[f"norm_current_{name}"] = float(left.norm().detach().cpu())
+        result[f"norm_previous_{name}"] = float(right.norm().detach().cpu())
+    return result

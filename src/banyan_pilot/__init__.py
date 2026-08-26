@@ -1,0 +1,3 @@
+"""Reduced topology-diversity continual-RL pilot."""
+
+__version__ = "0.1.0"

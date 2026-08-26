@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banyan-topology-pilot"
+version = "0.1.0"
+description = "Reduced topology-diversity continual-RL pilot inspired by Banyan"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "torch==2.6.0",
+  "numpy==1.26.4",
+  "matplotlib==3.9.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

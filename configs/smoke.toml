@@ -1,0 +1,38 @@
+[experiment]
+diversities = [1, 16, 256]
+seeds = [0]
+num_distributions = 4
+task_seed = 260600880
+steps_per_distribution = 2097152
+eval_interval_steps = 1048576
+eval_episodes = 256
+diagnostic_fractions = [0.0, 0.5, 1.0]
+output_root = "results/smoke"
+
+[environment]
+grid_size = 9
+max_depth = 6
+min_depth = 1
+max_leaves = 7
+object_feature_dim = 16
+max_episode_steps = 192
+num_envs = 256
+
+[ppo]
+rollout_steps = 64
+update_epochs = 1
+minibatch_envs = 64
+learning_rate = 0.00025
+gamma = 0.99
+gae_lambda = 0.95
+clip_coef = 0.2
+value_coef = 0.5
+entropy_coef = 0.01
+max_grad_norm = 0.5
+hidden_size = 128
+checkpoint_interval_updates = 20
+
+[diagnostics]
+num_envs = 128
+rollout_steps = 64
+eval_episodes = 256
