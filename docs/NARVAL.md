@@ -12,7 +12,7 @@ documentation.
 - GPU nodes expose four 40GB NVIDIA A100 SXM4 GPUs. A full device is requested
   with `--gpus=a100:1`.
 - Narval permits jobs up to 168 hours. Every training allocation requests only
-  three hours. An unfinished array task receives `USR1` three minutes before
+  two hours. An unfinished array task receives `USR1` three minutes before
   the limit, saves a complete checkpoint, and requeues itself. The next
   allocation resumes the same trajectory, so the shorter scheduler request
   does not reduce the experiment budget or the 1.5x runtime safety allowance.

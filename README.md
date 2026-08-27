@@ -52,7 +52,7 @@ bash scripts/narval_submit.sh --resume-main
 
 All training jobs are idempotent: completed runs exit immediately, and
 interrupted runs resume from `checkpoints/latest.pt`. Training is scheduled in
-three-hour allocation chunks. A three-minute SLURM signal saves the complete
+two-hour allocation chunks. A three-minute SLURM signal saves the complete
 training state and requeues only the unfinished array task, so shortening the
 scheduler request does not shorten the experiment or its safety buffer.
 
