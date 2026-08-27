@@ -111,8 +111,10 @@ def load_config(path: str | Path) -> Config:
 
 def validate_config(config: Config) -> None:
     exp, env, ppo, cbp = config.experiment, config.environment, config.ppo, config.cbp
-    if tuple(exp.diversities) != (1, 16, 256):
-        raise ValueError("Primary diversity levels must remain exactly (1, 16, 256)")
+    if tuple(exp.diversities) != (1, 4, 16, 64, 256):
+        raise ValueError(
+            "Primary diversity levels must remain exactly (1, 4, 16, 64, 256)"
+        )
     if exp.num_distributions != 4:
         raise ValueError("The pilot requires exactly four distributions")
     if not 1 <= env.min_depth <= env.max_depth:

@@ -24,10 +24,16 @@ choices:
   point.
 
 Thus the manipulated variable is the number of topology families sampled by a
-phase (`1`, `16`, or `256`). Layout count, number of groundings per topology,
+phase (`1`, `4`, `16`, `64`, or `256`). Layout count, number of groundings per topology,
 total updates, architecture, and catalog are otherwise matched. A condition is
 a prefix of the same deterministic phase catalog, making the comparison paired
 without allowing topology overlap across phases.
+
+The original `n=1`, `n=16`, and `n=256` conditions remain the low,
+intermediate, and high anchor points used by the preregistered qualitative
+criteria. The added `n=4` and `n=64` conditions estimate the shape of the
+diversity-response curve without redefining those criteria after observing
+results.
 
 ## PPO
 
@@ -106,9 +112,9 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 ## Compute choice
 
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
-32GB RAM, and 20 hours. The 15 primary conditions are a SLURM array, so elapsed
+32GB RAM, and 20 hours. The 25 primary conditions are a SLURM array, so elapsed
 time is governed by one run rather than the sum of all seeds when capacity is
 available. The smoke array requests eight hours and runs one full-budget phase
-for each seed-0 condition. Those three checkpoints are the corresponding main
+for each seed-0 condition. Those five checkpoints are the corresponding main
 runs, so successful smoke computation is reused rather than discarded. The
 maximum requested time remains far below Narval's 168-hour limit.

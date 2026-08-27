@@ -1,5 +1,5 @@
 [experiment]
-diversities = [1, 16, 256]
+diversities = [1, 4, 16, 64, 256]
 seeds = [0]
 num_distributions = 4
 task_seed = 260600880

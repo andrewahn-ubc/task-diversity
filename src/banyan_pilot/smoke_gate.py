@@ -27,7 +27,8 @@ def main() -> int:
         raise RuntimeError("The production smoke gate requires CBP to be enabled")
     root = Path(args.root)
     details: list[dict[str, Any]] = []
-    for diversity in (1, 16, 256):
+    diversities = tuple(config.experiment.diversities)
+    for diversity in diversities:
         run_dir = root / f"n{diversity}" / "seed_0"
         marker_path = run_dir / "pilot_complete.json"
         if not marker_path.exists():
@@ -75,12 +76,16 @@ def main() -> int:
                 "cbp_total_replacements": replacement_totals,
             }
         )
-    required_conditions = [item for item in details if item["diversity"] in (1, 16)]
+    required_diversities = diversities[:-1]
+    required_conditions = [
+        item for item in details if item["diversity"] in required_diversities
+    ]
     passed = all(item["phase_1_gain"] >= args.minimum_gain for item in required_conditions)
     payload = {
         "status": "pass" if passed else "fail",
         "criterion": (
-            f"Both n=1 and n=16 improve by at least {args.minimum_gain:.3f} "
+            f"All non-maximum diversities {required_diversities} improve by at least "
+            f"{args.minimum_gain:.3f} "
             "during the full-budget first phase, with verified CBP replacements"
         ),
         "minimum_gain": args.minimum_gain,

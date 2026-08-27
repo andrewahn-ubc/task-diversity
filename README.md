@@ -2,7 +2,7 @@
 
 This repository implements the four-distribution pilot in
 `banyan_reduced_diversity_interference_pilot.md`: topology diversity
-`n in {1, 16, 256}`, five matched seeds, recurrent PPO + Continual Backprop
+`n in {1, 4, 16, 64, 256}`, five matched seeds, recurrent PPO + Continual Backprop
 (CBP), independent success evaluation, backward evaluation on `d1`, and
 current-versus-previous PPO-gradient cosines.
 
@@ -33,9 +33,9 @@ That command does all of the following without contacting PyPI:
    top-level packages with both `PIP_NO_INDEX=1` and `--no-index`;
 5. verifies exact package versions, the Alliance CUDA-enabled Torch build, and
    the resolved dependency graph;
-6. trains the full-budget first phase for the three seed-0 conditions;
+6. trains the full-budget first phase for the five seed-0 conditions;
 7. verifies nontrivial low/intermediate-diversity learning and actual CBP
-   replacements before resuming those checkpoints in the full 15-run array; and
+   replacements before resuming those checkpoints in the full 25-run array; and
 8. aggregates the complete sweep into CSV/JSON, five figures, and a Markdown
    report.
 
@@ -60,7 +60,7 @@ After the final aggregation job succeeds:
 
 ```text
 results/
-  raw-cbp/n{1,16,256}/seed_{0..4}/
+  raw-cbp/n{1,4,16,64,256}/seed_{0..4}/
     metrics.jsonl
     diagnostics.jsonl
     checkpoints/latest.pt

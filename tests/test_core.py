@@ -35,6 +35,9 @@ class PilotCoreTests(unittest.TestCase):
         )
 
     def test_catalog_is_phase_disjoint_and_nested(self) -> None:
+        self.assertEqual(self.config.experiment.diversities, (1, 4, 16, 64, 256))
+        for diversity in self.config.experiment.diversities:
+            self.assertEqual(self.catalog.task_ids(0, diversity).numel(), 6 * diversity)
         signatures = []
         for phase in range(4):
             phase_signatures = {

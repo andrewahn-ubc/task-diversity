@@ -15,10 +15,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-DIVERSITIES = (1, 16, 256)
+DIVERSITIES = (1, 4, 16, 64, 256)
 SEEDS = (0, 1, 2, 3, 4)
-COLORS = {1: "#D55E00", 16: "#0072B2", 256: "#009E73"}
-MARKERS = {1: "o", 16: "s", 256: "^"}
+COLORS = {
+    1: "#D55E00",
+    4: "#E69F00",
+    16: "#0072B2",
+    64: "#CC79A7",
+    256: "#009E73",
+}
+MARKERS = {1: "o", 4: "s", 16: "^", 64: "D", 256: "P"}
 SEED_MARKERS = {0: "o", 1: "s", 2: "^", 3: "D", 4: "P"}
 
 
@@ -182,7 +188,9 @@ def summarize(
         )
     )
     coefficients = np.linalg.lstsq(design, subsequent[valid], rcond=None)[0]
-    low, middle, high = (conditions[str(value)] for value in DIVERSITIES)
+    low = conditions["1"]
+    middle = conditions["16"]
+    high = conditions["256"]
     transfer_order = high["mean_transfer_gap_d2_d4"] < low["mean_transfer_gap_d2_d4"]
     specialization_plateau = (
         high["mean_specialization_gain_d2_d4"]
@@ -276,7 +284,7 @@ def make_figures(
     for boundary in range(1, 4):
         ax.axvline(boundary * phase_budget / 1e6, color="0.35", ls="--", lw=1)
     ax.set(xlabel="Environment steps (millions)", ylabel="Evaluation success rate", ylim=(-0.02, 1.02))
-    ax.legend(frameon=False, ncol=3)
+    ax.legend(frameon=False, ncol=len(DIVERSITIES))
     ax.set_title("Continual learning across four topology distributions")
     _save(fig, figures, "figure1_learning_curves")
 
@@ -297,22 +305,26 @@ def make_figures(
             mean, ci = mean_ci(per_seed)
             means.append(mean)
             cis.append(ci)
-        axis.bar(range(3), means, yerr=cis, capsize=4, color=[COLORS[n] for n in DIVERSITIES], alpha=0.85)
+        positions = range(len(DIVERSITIES))
+        axis.bar(positions, means, yerr=cis, capsize=4, color=[COLORS[n] for n in DIVERSITIES], alpha=0.85)
         axis.axhline(0, color="0.25", lw=0.8)
-        axis.set_xticks(range(3), [str(n) for n in DIVERSITIES])
+        axis.set_xticks(positions, [str(n) for n in DIVERSITIES])
         axis.set_title(title)
         axis.set_xlabel("Topology diversity n")
     axes[0].set_ylabel("Success-rate difference (mean and 95% CI)")
     _save(fig, figures, "figure2_transfer_specialization")
 
     fig, axes = plt.subplots(1, 3, figsize=(10.2, 3.5), sharey=True)
+    diversity_offsets = dict(
+        zip(DIVERSITIES, np.linspace(-0.04, 0.04, len(DIVERSITIES)))
+    )
     for phase, axis in zip((2, 3, 4), axes):
         for diversity in DIVERSITIES:
             rows = [row for row in diagnostic_rows if row["phase"] == phase and row["diversity"] == diversity]
             for fraction in (0.0, 0.5, 1.0):
                 values = [row["cosine_all"] for row in rows if math.isclose(row["phase_fraction"], fraction)]
                 mean, ci = mean_ci(values)
-                x = fraction + {1: -0.025, 16: 0.0, 256: 0.025}[diversity]
+                x = fraction + diversity_offsets[diversity]
                 axis.errorbar(x, mean, yerr=ci, color=COLORS[diversity], marker=MARKERS[diversity], capsize=3, label=f"n={diversity}")
         axis.axhline(0, color="0.25", lw=0.8)
         axis.set_xticks((0.0, 0.5, 1.0), ("start", "mid", "end"))
@@ -325,7 +337,7 @@ def make_figures(
     fig.legend(
         [unique[f"n={diversity}"] for diversity in DIVERSITIES],
         [f"n={diversity}" for diversity in DIVERSITIES],
-        loc="upper center", ncol=3, frameon=False,
+        loc="upper center", ncol=len(DIVERSITIES), frameon=False,
     )
     fig.subplots_adjust(top=0.78)
     _save(fig, figures, "figure3_gradient_interference")
@@ -395,7 +407,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         "## Exact setup",
         "",
-        "A recurrent PPO + Continual Backprop (CBP) agent trained sequentially on four disjoint topology distributions at n = 1, 16, and 256, with five matched seeds. Each phase used 50,331,648 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, CBP configuration, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
+        "A recurrent PPO + Continual Backprop (CBP) agent trained sequentially on four disjoint topology distributions at n = 1, 4, 16, 64, and 256, with five matched seeds. Each phase used 50,331,648 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, CBP configuration, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
         "",
         "The official Banyan code was not public when this repository was created. The CBP generate-and-test rule and element-wise Adam-state reset are adapted from Dohare et al.'s official implementation. This repository applies them to every learned feature layer and adds a documented GRU extension. A plateau that persists under this intervention is less consistent with conventional loss of plasticity, although CBP cannot logically eliminate every plasticity-related explanation.",
         "",

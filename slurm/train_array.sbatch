@@ -28,7 +28,7 @@ python -m banyan_pilot.preflight \
   --require-narval-runtime \
   --require-cuda
 
-DIVERSITIES=(1 16 256)
+DIVERSITIES=(1 4 16 64 256)
 if [[ "${BANYAN_MODE:?}" == "smoke" ]]; then
   DIVERSITY="${DIVERSITIES[$SLURM_ARRAY_TASK_ID]}"
   SEED=0
