@@ -444,8 +444,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="results/raw-cbp-50m")
-    parser.add_argument("--output", default="results/cbp-50m")
+    parser.add_argument("--root", default="results/raw-cbp")
+    parser.add_argument("--output", default="results/cbp")
     args = parser.parse_args()
     output = Path(args.output)
     phase_rows, diagnostic_rows, curve_rows = collect(Path(args.root))

@@ -7,7 +7,7 @@ steps_per_distribution = 50331648
 eval_interval_steps = 2097152
 eval_episodes = 1024
 diagnostic_fractions = [0.0, 0.5, 1.0]
-output_root = "results/raw-cbp-50m"
+output_root = "results/raw-cbp"
 
 [environment]
 grid_size = 9

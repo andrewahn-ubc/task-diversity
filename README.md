@@ -60,12 +60,12 @@ After the final aggregation job succeeds:
 
 ```text
 results/
-  raw-cbp-50m/n{1,16,256}/seed_{0..4}/
+  raw-cbp/n{1,16,256}/seed_{0..4}/
     metrics.jsonl
     diagnostics.jsonl
     checkpoints/latest.pt
     completed.json
-  cbp-50m/
+  cbp/
     aggregated/
       phase_metrics.csv
       interference_metrics.csv
