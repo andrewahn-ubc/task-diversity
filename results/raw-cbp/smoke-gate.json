@@ -1,0 +1,58 @@
+{
+  "budget_was_changed": false,
+  "conditions": [
+    {
+      "cbp_total_replacements": {
+        "conv1": 19,
+        "conv2": 19,
+        "gru": 153,
+        "pre_gru": 153
+      },
+      "diversity": 1,
+      "phase_1_gain": 0.3466796875
+    },
+    {
+      "cbp_total_replacements": {
+        "conv1": 19,
+        "conv2": 19,
+        "gru": 153,
+        "pre_gru": 153
+      },
+      "diversity": 4,
+      "phase_1_gain": 0.685546875
+    },
+    {
+      "cbp_total_replacements": {
+        "conv1": 19,
+        "conv2": 19,
+        "gru": 153,
+        "pre_gru": 153
+      },
+      "diversity": 16,
+      "phase_1_gain": 0.3193359375
+    },
+    {
+      "cbp_total_replacements": {
+        "conv1": 19,
+        "conv2": 19,
+        "gru": 153,
+        "pre_gru": 153
+      },
+      "diversity": 64,
+      "phase_1_gain": 0.3359375
+    },
+    {
+      "cbp_total_replacements": {
+        "conv1": 19,
+        "conv2": 19,
+        "gru": 153,
+        "pre_gru": 153
+      },
+      "diversity": 256,
+      "phase_1_gain": 0.337890625
+    }
+  ],
+  "criterion": "All non-maximum diversities (1, 4, 16, 64) improve by at least 0.030 during the full-budget first phase, with verified CBP replacements",
+  "minimum_gain": 0.03,
+  "status": "pass"
+}

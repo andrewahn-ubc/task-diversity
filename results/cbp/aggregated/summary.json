@@ -1,0 +1,58 @@
+{
+  "conditions": {
+    "1": {
+      "ci95_gradient_cosine": 0.13662469864893573,
+      "ci95_specialization_gain_d2_d4": 0.1250539402308381,
+      "ci95_transfer_gap_d2_d4": 0.22613075710184677,
+      "mean_gradient_cosine": 0.10942615343050824,
+      "mean_specialization_gain_d2_d4": 0.10514322916666667,
+      "mean_transfer_gap_d2_d4": 0.0016276041666666657
+    },
+    "16": {
+      "ci95_gradient_cosine": 0.2517987665752426,
+      "ci95_specialization_gain_d2_d4": 0.05058286195873689,
+      "ci95_transfer_gap_d2_d4": 0.01900880816896623,
+      "mean_gradient_cosine": 0.09105621559752358,
+      "mean_specialization_gain_d2_d4": 0.009244791666666667,
+      "mean_transfer_gap_d2_d4": 0.006510416666666667
+    },
+    "256": {
+      "ci95_gradient_cosine": 0.1140974726541106,
+      "ci95_specialization_gain_d2_d4": 0.0144261050313237,
+      "ci95_transfer_gap_d2_d4": 0.005279952418565692,
+      "mean_gradient_cosine": 0.29625460435118944,
+      "mean_specialization_gain_d2_d4": -0.006705729166666667,
+      "mean_transfer_gap_d2_d4": -0.0103515625
+    },
+    "4": {
+      "ci95_gradient_cosine": 0.04764116286384984,
+      "ci95_specialization_gain_d2_d4": 0.013187038359152666,
+      "ci95_transfer_gap_d2_d4": 0.013821941698613784,
+      "mean_gradient_cosine": 0.15185696109482605,
+      "mean_specialization_gain_d2_d4": 0.003059895833333333,
+      "mean_transfer_gap_d2_d4": 0.1056640625
+    },
+    "64": {
+      "ci95_gradient_cosine": 0.17094041151166284,
+      "ci95_specialization_gain_d2_d4": 0.0035044685635905537,
+      "ci95_transfer_gap_d2_d4": 0.013802432115286494,
+      "mean_gradient_cosine": 0.17810640206767453,
+      "mean_specialization_gain_d2_d4": -0.0028645833333333336,
+      "mean_transfer_gap_d2_d4": -0.016601562499999997
+    }
+  },
+  "criteria": {
+    "higher_diversity_improves_transfer": true,
+    "interference_association_supported": false,
+    "n256_has_lower_cosine_than_n16": false,
+    "n256_specializes_less_than_n16": true,
+    "reduced_tradeoff_reproduced": true
+  },
+  "interference_specialization_correlation": 0.06789199547614885,
+  "regression_subsequent_gain_on_cosine_and_log2_diversity": {
+    "cosine_coefficient": 0.027238634360776438,
+    "intercept": -0.06589710571961502,
+    "log2_diversity_coefficient": -0.0032497232575235888,
+    "n": 225
+  }
+}

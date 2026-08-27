@@ -1,0 +1,15 @@
+{
+  "algorithm": "ppo_cbp",
+  "cbp_total_replacements": {
+    "conv1": 77,
+    "conv2": 77,
+    "gru": 620,
+    "pre_gru": 620
+  },
+  "config_fingerprint": "be7423507ab7bafd",
+  "diversity": 1,
+  "seed": 1,
+  "status": "complete",
+  "total_env_steps": 201326592,
+  "wall_time_seconds": 810.267493724823
+}

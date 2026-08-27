@@ -1,0 +1,77 @@
+{
+  "algorithm": "ppo_cbp",
+  "config": {
+    "cbp": {
+      "decay_rate": 0.99,
+      "enabled": true,
+      "maturity_threshold": 100,
+      "replacement_rate": 0.0001,
+      "utility": "contribution"
+    },
+    "diagnostics": {
+      "eval_episodes": 512,
+      "num_envs": 256,
+      "rollout_steps": 128
+    },
+    "environment": {
+      "grid_size": 9,
+      "max_depth": 6,
+      "max_episode_steps": 192,
+      "max_leaves": 7,
+      "min_depth": 1,
+      "num_envs": 1024,
+      "object_feature_dim": 16
+    },
+    "experiment": {
+      "diagnostic_fractions": [
+        0.0,
+        0.5,
+        1.0
+      ],
+      "diversities": [
+        1,
+        4,
+        16,
+        64,
+        256
+      ],
+      "eval_episodes": 1024,
+      "eval_interval_steps": 2097152,
+      "num_distributions": 4,
+      "output_root": "results/raw-cbp",
+      "seeds": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "steps_per_distribution": 50331648,
+      "task_seed": 260600880
+    },
+    "ppo": {
+      "checkpoint_interval_updates": 20,
+      "clip_coef": 0.2,
+      "entropy_coef": 0.01,
+      "gae_lambda": 0.95,
+      "gamma": 0.99,
+      "hidden_size": 256,
+      "learning_rate": 0.00025,
+      "max_grad_norm": 0.5,
+      "minibatch_envs": 128,
+      "rollout_steps": 128,
+      "update_epochs": 2,
+      "value_coef": 0.5
+    }
+  },
+  "config_fingerprint": "be7423507ab7bafd",
+  "cuda_version": "12.2",
+  "device": "cuda",
+  "diversity": 256,
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "seed": 0,
+  "slurm_array_task_id": "4",
+  "slurm_job_id": "1824811",
+  "started_unix": 1787807401.0594406,
+  "torch_version": "2.6.0"
+}
