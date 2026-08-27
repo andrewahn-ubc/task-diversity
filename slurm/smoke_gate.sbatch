@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=banyan-smoke-gate
+#SBATCH --account=def-mijungp_cpu
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
 #SBATCH --time=01:00:00

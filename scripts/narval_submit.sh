@@ -8,6 +8,8 @@ MODE="${1:-all}"
 TRAIN_CHUNK_TIME="01:00:00"
 SMOKE_CHUNK_COUNT=8
 MAIN_CHUNK_COUNT=21
+GPU_ACCOUNT="rrg-mijungp_gpu"
+CPU_ACCOUNT="def-mijungp_cpu"
 case "$MODE" in
   all|--preflight-only|--smoke-only|--resume-main) ;;
   *)
@@ -18,6 +20,10 @@ esac
 
 if ! command -v module >/dev/null 2>&1; then
   echo "The Alliance 'module' command is unavailable. Run this script on Narval." >&2
+  exit 2
+fi
+if ! command -v sshare >/dev/null 2>&1; then
+  echo "The 'sshare' command is unavailable. Run this script on a Narval login node." >&2
   exit 2
 fi
 if [[ "$MODE" != "--preflight-only" ]]; then
@@ -138,6 +144,18 @@ python -m banyan_pilot.preflight \
   --output results/environment/preflight-login.json
 printf '%s\n' "$ENVIRONMENT_SCHEMA" > "$VENV_STAMP"
 
+ACCOUNT_REPORT="$(sshare -l -U "$USER")"
+for required_account in "$GPU_ACCOUNT" "$CPU_ACCOUNT"; do
+  if ! awk -v expected="$required_account" \
+    '$1 == expected { found = 1 } END { exit(found ? 0 : 1) }' \
+    <<<"$ACCOUNT_REPORT"; then
+    echo "Required Narval association '$required_account' is unavailable for $USER." >&2
+    echo "$ACCOUNT_REPORT" >&2
+    exit 2
+  fi
+done
+echo "Verified Narval accounts: GPU=$GPU_ACCOUNT CPU=$CPU_ACCOUNT"
+
 if [[ "$MODE" == "--preflight-only" ]]; then
   echo "Narval dependency and CPU preflight passed. No jobs submitted."
   exit 0
@@ -175,7 +193,7 @@ submit_training_chain() {
     fi
     submit_args=(
       --parsable
-      --account=def-mijungp
+      --account="$GPU_ACCOUNT"
       --array="$array_spec"
       --time="$TRAIN_CHUNK_TIME"
       --job-name="banyan-${training_mode}-c${chunk}"
@@ -209,7 +227,7 @@ submit_single_job() {
   local dependency="$1"
   local script="$2"
   local raw_job job_id
-  raw_job="$(sbatch --parsable --account=def-mijungp \
+  raw_job="$(sbatch --parsable --account="$CPU_ACCOUNT" \
     --dependency="afterok:${dependency}" "$script")"
   job_id="${raw_job%%;*}"
   if [[ ! "$job_id" =~ ^[0-9]+$ ]]; then

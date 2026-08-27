@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=banyan-aggregate
+#SBATCH --account=def-mijungp_cpu
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
 #SBATCH --time=01:00:00

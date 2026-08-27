@@ -39,8 +39,11 @@ That command does all of the following without contacting PyPI:
 8. aggregates the complete sweep into CSV/JSON, five figures, and a Markdown
    report.
 
-The jobs charge `def-mijungp`. The submission command prints every job ID and
-the exact `squeue` command needed to monitor the pipeline.
+The A100 training arrays charge `rrg-mijungp_gpu`; the CPU-only smoke gate and
+aggregation charge `def-mijungp_cpu`. Before submitting anything, the launcher
+requires both exact associations to appear in `sshare -l -U "$USER"`. The
+submission command prints every job ID and the exact `squeue` command needed to
+monitor the pipeline.
 
 Useful variants:
 

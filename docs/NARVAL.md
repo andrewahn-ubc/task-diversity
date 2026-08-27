@@ -11,6 +11,10 @@ documentation.
   environments are blocked.
 - GPU nodes expose four 40GB NVIDIA A100 SXM4 GPUs. A full device is requested
   with `--gpus=a100:1`.
+- GPU training uses the exact Narval association `rrg-mijungp_gpu`. The small
+  CPU-only gate and aggregation jobs use `def-mijungp_cpu`. The unsuffixed
+  `rrg-mijungp` name is not assumed: before submitting, the launcher requires
+  both selected accounts to appear in the current user's live `sshare` report.
 - Narval permits jobs up to 168 hours. Training is split into distinct,
   dependent array jobs, every one capped at one hour. An unfinished array task
   receives `USR1` fifteen minutes before the limit and saves a complete

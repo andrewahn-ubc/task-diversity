@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=banyan-pilot
+#SBATCH --account=rrg-mijungp_gpu
 #SBATCH --gpus=a100:1
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
