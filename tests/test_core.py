@@ -113,6 +113,17 @@ class PilotCoreTests(unittest.TestCase):
         self.assertEqual(reward[1].item(), -1.0)
         self.assertTrue(done.all().item())
 
+    def test_environment_checkpoint_preserves_random_stream(self) -> None:
+        env = self.make_env(self.catalog.task_ids(0, 16), num_envs=8)
+        state = env.state_dict()
+        env.reset()
+        expected_task_index = env.task_index.clone()
+        expected_objects = env.objects.clone()
+        env.load_state_dict(state)
+        env.reset()
+        torch.testing.assert_close(env.task_index, expected_task_index)
+        torch.testing.assert_close(env.objects, expected_objects)
+
     def test_recurrent_ppo_update_and_gradient_cosine(self) -> None:
         env = self.make_env(self.catalog.task_ids(0, 1), num_envs=4)
         model = RecurrentActorCritic(

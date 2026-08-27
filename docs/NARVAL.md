@@ -99,7 +99,8 @@ these pass:
    build;
 6. CPU imports and a deterministic 6,144-task catalog/environment probe; and
 7. on every allocated GPU, CUDA availability, A100 `sm_80` kernel support,
-   catalog disjointness, an environment step, a real convolution/GRU
+   catalog disjointness, environment and PPO RNG checkpoint restoration, an
+   environment step, a real convolution/GRU
    forward-and-backward pass, one custom Adam step, forced CBP replacements in
    every controlled layer, and CUDA synchronization.
 

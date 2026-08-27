@@ -105,6 +105,29 @@ def run_preflight(
         raise RuntimeError("Environment observation shape check failed")
     if not torch.isfinite(reward).all() or done.shape != (8,):
         raise RuntimeError("Environment step check failed")
+    environment_state = probe_env.state_dict()
+    probe_env.reset()
+    expected_task_index = probe_env.task_index.clone()
+    expected_objects = probe_env.objects.clone()
+    probe_env.load_state_dict(environment_state)
+    probe_env.reset()
+    if not torch.equal(probe_env.task_index, expected_task_index) or not torch.equal(
+        probe_env.objects, expected_objects
+    ):
+        raise RuntimeError("Environment checkpoint RNG restoration is not deterministic")
+    update_generator = torch.Generator(device=device)
+    update_generator.manual_seed(991)
+    update_generator_state = update_generator.get_state().cpu()
+    expected_random = torch.rand(8, generator=update_generator, device=device)
+    update_generator.set_state(update_generator_state)
+    actual_random = torch.rand(8, generator=update_generator, device=device)
+    if not torch.equal(actual_random, expected_random):
+        raise RuntimeError("PPO generator checkpoint restoration is not deterministic")
+    cpu_rng_state = torch.get_rng_state().cpu()
+    torch.set_rng_state(cpu_rng_state)
+    if require_cuda:
+        cuda_rng_states = [state.cpu() for state in torch.cuda.get_rng_state_all()]
+        torch.cuda.set_rng_state_all(cuda_rng_states)
     probe_model = RecurrentActorCritic(
         grid_size=config.environment.grid_size,
         object_feature_dim=config.environment.object_feature_dim,
@@ -170,6 +193,7 @@ def run_preflight(
         "cudnn_version": torch.backends.cudnn.version() if require_cuda else None,
         "cbp_enabled": config.cbp.enabled,
         "cbp_optimizer_reset_probe": cbp_probe_ok,
+        "checkpoint_rng_restore_probe": True,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
     }
     return payload

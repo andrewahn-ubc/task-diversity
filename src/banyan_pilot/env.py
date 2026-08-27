@@ -237,6 +237,8 @@ class VectorBanyan:
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         self.task_pool = state["task_pool"].to(self.device)
-        self.generator.set_state(state["generator_state"].to(self.device))
+        # Generator state is serialized as a CPU ByteTensor. PyTorch expects
+        # that representation even when the generator produces CUDA tensors.
+        self.generator.set_state(state["generator_state"].cpu())
         for name in ("objects", "agent", "held", "elapsed", "task_index", "root", "depth"):
             setattr(self, name, state[name].to(self.device))

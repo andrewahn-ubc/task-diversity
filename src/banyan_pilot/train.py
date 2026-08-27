@@ -346,10 +346,15 @@ class Trainer:
         self.obs = CompactObs(*(value.to(self.device) for value in checkpoint["obs"]))
         self.hidden = checkpoint["hidden"].to(self.device)
         self.episode_start = checkpoint["episode_start"].to(self.device)
-        self.update_generator.set_state(checkpoint["update_generator"].to(self.device))
-        torch.set_rng_state(checkpoint["torch_rng"])
+        # RNG-state APIs consume CPU ByteTensors, including for CUDA-backed
+        # generators. torch.load(map_location=self.device) moves every tensor
+        # in the checkpoint, so explicitly return these state blobs to CPU.
+        self.update_generator.set_state(checkpoint["update_generator"].cpu())
+        torch.set_rng_state(checkpoint["torch_rng"].cpu())
         if torch.cuda.is_available() and checkpoint["cuda_rng"] is not None:
-            torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])
+            torch.cuda.set_rng_state_all(
+                [state.cpu() for state in checkpoint["cuda_rng"]]
+            )
         np.random.set_state(checkpoint["numpy_rng"])
         random.setstate(checkpoint["python_rng"])
         self.logged_diagnostics = {tuple(item) for item in checkpoint["logged_diagnostics"]}
