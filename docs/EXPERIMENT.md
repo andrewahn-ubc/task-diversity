@@ -112,7 +112,7 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 ## Compute choice
 
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
-and 32GB RAM. Every scheduler allocation is limited to two hours. Three
+and 32GB RAM. Every scheduler allocation is limited to one hour. Three
 minutes before that limit, the run checkpoints the policy, optimizer, CBP,
 environment, recurrent state, and random generators, then requeues only that
 unfinished array task. The next allocation restores the same trajectory; it is

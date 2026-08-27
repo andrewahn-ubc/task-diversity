@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 MODE="${1:-all}"
-TRAIN_CHUNK_TIME="02:00:00"
+TRAIN_CHUNK_TIME="01:00:00"
 case "$MODE" in
   all|--preflight-only|--smoke-only|--resume-main) ;;
   *)
@@ -174,6 +174,6 @@ Submitted full 25-run array (held until gate passes): $MAIN_JOB
 Submitted final aggregation (held until all runs pass): $AGG_JOB
 Monitor with: squeue -u $USER -j ${SMOKE_JOB},${GATE_JOB},${MAIN_JOB},${AGG_JOB}
 The smoke jobs are the first phase of the five seed-0 main runs; their checkpoints are reused.
-Training allocations are two-hour chunks; unfinished array tasks checkpoint and requeue themselves.
+Training allocations are one-hour chunks; unfinished array tasks checkpoint and requeue themselves.
 If the smoke gate fails, inspect results/raw-cbp/smoke-gate.json; the main budget is not changed automatically.
 EOF
