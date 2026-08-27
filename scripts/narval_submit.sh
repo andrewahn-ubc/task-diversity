@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 MODE="${1:-all}"
+TRAIN_CHUNK_TIME="03:00:00"
 case "$MODE" in
   all|--preflight-only|--smoke-only|--resume-main) ;;
   *)
@@ -137,7 +138,7 @@ if [[ "$MODE" == "--preflight-only" ]]; then
 fi
 
 if [[ "$MODE" == "--resume-main" ]]; then
-  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=15:00:00 \
+  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time="$TRAIN_CHUNK_TIME" \
     --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
     slurm/train_array.sbatch)"
   AGG_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${MAIN_JOB}" \
@@ -148,7 +149,7 @@ if [[ "$MODE" == "--resume-main" ]]; then
   exit 0
 fi
 
-SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-4 --time=05:30:00 \
+SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-4 --time="$TRAIN_CHUNK_TIME" \
   --export=ALL,BANYAN_MODE=smoke,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
   slurm/train_array.sbatch)"
 echo "Submitted smoke array: $SMOKE_JOB"
@@ -160,7 +161,7 @@ fi
 
 GATE_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${SMOKE_JOB}" \
   slurm/smoke_gate.sbatch)"
-MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=15:00:00 \
+MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time="$TRAIN_CHUNK_TIME" \
   --dependency="afterok:${GATE_JOB}" \
   --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
   slurm/train_array.sbatch)"
@@ -173,5 +174,6 @@ Submitted full 25-run array (held until gate passes): $MAIN_JOB
 Submitted final aggregation (held until all runs pass): $AGG_JOB
 Monitor with: squeue -u $USER -j ${SMOKE_JOB},${GATE_JOB},${MAIN_JOB},${AGG_JOB}
 The smoke jobs are the first phase of the five seed-0 main runs; their checkpoints are reused.
+Training allocations are three-hour chunks; unfinished array tasks checkpoint and requeue themselves.
 If the smoke gate fails, inspect results/raw-cbp/smoke-gate.json; the main budget is not changed automatically.
 EOF

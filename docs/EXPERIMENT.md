@@ -112,9 +112,14 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 ## Compute choice
 
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
-32GB RAM, and 15 hours. The 25 primary conditions are a SLURM array, so elapsed
-time is governed by one run rather than the sum of all seeds when capacity is
-available. The smoke array requests 5 hours 30 minutes and runs one full-budget
-phase for each seed-0 condition. Those five checkpoints are the corresponding main
-runs, so successful smoke computation is reused rather than discarded. The
-maximum requested time remains far below Narval's 168-hour limit.
+and 32GB RAM. Every scheduler allocation is limited to three hours. Three
+minutes before that limit, the run checkpoints the policy, optimizer, CBP,
+environment, recurrent state, and random generators, then requeues only that
+unfinished array task. The next allocation restores the same trajectory; it is
+not a new seed or policy. This keeps the previous 1.5x runtime safety allowance
+and permits further continuation if the estimate is low, while presenting
+short requests to the scheduler. The 25 primary conditions are a SLURM array,
+so elapsed time is governed by the slowest run rather than the sum of all seeds
+when capacity is available. The smoke array runs one full-budget phase for each
+seed-0 condition. Those five checkpoints are the corresponding main runs, so
+successful smoke computation is reused rather than discarded.

@@ -3,9 +3,10 @@
 #SBATCH --gpus=a100:1
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
-#SBATCH --time=15:00:00
+#SBATCH --time=03:00:00
 #SBATCH --signal=USR1@180
 #SBATCH --requeue
+#SBATCH --open-mode=append
 #SBATCH --output=logs/%x-%A_%a.out
 #SBATCH --error=logs/%x-%A_%a.err
 
