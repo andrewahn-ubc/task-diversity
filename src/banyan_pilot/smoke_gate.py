@@ -16,8 +16,8 @@ def _records(path: Path) -> list[dict[str, Any]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="results/raw-cbp")
-    parser.add_argument("--output", default="results/raw-cbp/smoke-gate.json")
+    parser.add_argument("--root", default="results/raw-cbp-50m")
+    parser.add_argument("--output", default="results/raw-cbp-50m/smoke-gate.json")
     parser.add_argument("--config", default="configs/main.toml")
     parser.add_argument("--minimum-gain", type=float, default=0.03)
     args = parser.parse_args()

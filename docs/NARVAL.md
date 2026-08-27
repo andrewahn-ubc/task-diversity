@@ -11,8 +11,8 @@ documentation.
   environments are blocked.
 - GPU nodes expose four 40GB NVIDIA A100 SXM4 GPUs. A full device is requested
   with `--gpus=a100:1`.
-- Narval permits jobs up to 168 hours. The first-phase pilot jobs request 4
-  hours and the resumable primary runs request 10 hours.
+- Narval permits jobs up to 168 hours. The first-phase pilot jobs request 8
+  hours and the resumable primary runs request 20 hours.
 
 Source: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en).
 

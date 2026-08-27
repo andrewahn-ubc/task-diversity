@@ -19,7 +19,7 @@ choices:
   assigned to `d1` through `d4`, and nested at depths 1 through 6;
 - recurrent convolutional PPO with Continual Backprop (CBP) applied to both
   convolutional feature layers, the pre-GRU layer, and GRU hidden features;
-- 25,165,824 environment steps per phase (192 complete PPO rollouts), 1,024
+- 50,331,648 environment steps per phase (384 complete PPO rollouts), 1,024
   vector environments, and 1,024 independent evaluation episodes per curve
   point.
 
@@ -84,8 +84,8 @@ interference; the gradient analysis remains correlational.
 
 ## Phase measurements
 
-Evaluation occurs before any update in each phase, every 1M environment steps,
-and at phase end. `S_start(di)` and `S_end(di)` are therefore literal
+Evaluation occurs before any update in each phase, every 2,097,152 environment
+steps, and at phase end. `S_start(di)` and `S_end(di)` are therefore literal
 independent-evaluation measurements. At each phase end the policy is also
 evaluated on `d1`. The aggregator computes:
 
@@ -106,9 +106,9 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 ## Compute choice
 
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
-32GB RAM, and 10 hours. The 15 primary conditions are a SLURM array, so elapsed
+32GB RAM, and 20 hours. The 15 primary conditions are a SLURM array, so elapsed
 time is governed by one run rather than the sum of all seeds when capacity is
-available. The smoke array requests four hours and runs one full-budget phase
+available. The smoke array requests eight hours and runs one full-budget phase
 for each seed-0 condition. Those three checkpoints are the corresponding main
 runs, so successful smoke computation is reused rather than discarded. The
 maximum requested time remains far below Narval's 168-hour limit.

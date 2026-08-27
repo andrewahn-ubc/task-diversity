@@ -395,7 +395,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         "## Exact setup",
         "",
-        "A recurrent PPO + Continual Backprop (CBP) agent trained sequentially on four disjoint topology distributions at n = 1, 16, and 256, with five matched seeds. Each phase used 25,165,824 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, CBP configuration, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
+        "A recurrent PPO + Continual Backprop (CBP) agent trained sequentially on four disjoint topology distributions at n = 1, 16, and 256, with five matched seeds. Each phase used 50,331,648 environment steps. The layout, deterministic object grounding procedure, architecture, optimizer, CBP configuration, evaluation budget, and diagnostic schedule were held fixed. Success was measured on independent evaluation episodes.",
         "",
         "The official Banyan code was not public when this repository was created. The CBP generate-and-test rule and element-wise Adam-state reset are adapted from Dohare et al.'s official implementation. This repository applies them to every learned feature layer and adds a documented GRU extension. A plateau that persists under this intervention is less consistent with conventional loss of plasticity, although CBP cannot logically eliminate every plasticity-related explanation.",
         "",
@@ -427,7 +427,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             "## Limitations",
             "",
             "- The environment is a documented reduced reconstruction because the authors' implementation and full hyperparameters were unavailable.",
-            "- Only topology diversity is varied, the sequence has four rather than ten distributions, and the phase budget is much smaller than the paper's 100M steps.",
+            "- Only topology diversity is varied, the sequence has four rather than ten distributions, and the phase budget is approximately half the paper's 100M steps.",
             "- The official CBP code supports feed-forward networks; the GRU feature-block extension here is necessary for the recurrent policy but has not been validated by the Banyan or CBP authors.",
             "- CBP actively mitigates loss of plasticity but cannot prove that every residual plateau is caused only by gradient interference.",
             "- Gradient conflict is observational; it cannot establish that interference causes stalled specialization.",
@@ -444,8 +444,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="results/raw-cbp")
-    parser.add_argument("--output", default="results/cbp")
+    parser.add_argument("--root", default="results/raw-cbp-50m")
+    parser.add_argument("--output", default="results/cbp-50m")
     args = parser.parse_args()
     output = Path(args.output)
     phase_rows, diagnostic_rows, curve_rows = collect(Path(args.root))

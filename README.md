@@ -60,12 +60,12 @@ After the final aggregation job succeeds:
 
 ```text
 results/
-  raw-cbp/n{1,16,256}/seed_{0..4}/
+  raw-cbp-50m/n{1,16,256}/seed_{0..4}/
     metrics.jsonl
     diagnostics.jsonl
     checkpoints/latest.pt
     completed.json
-  cbp/
+  cbp-50m/
     aggregated/
       phase_metrics.csv
       interference_metrics.csv
@@ -101,8 +101,8 @@ PYTHONPATH=src python3 -m banyan_pilot.train \
 
 - Diversity is topology count only; optimization steps, evaluation episodes,
   architecture, task catalog seed, and object/layout generators are matched.
-- The phase budget is fixed before the sweep at 25,165,824 environment steps
-  (192 complete recurrent PPO rollouts). The smoke gate does not tune or
+- The phase budget is fixed before the sweep at 50,331,648 environment steps
+  (384 complete recurrent PPO rollouts). The smoke gate does not tune or
   increase it.
 - PPO is paired with CBP at every optimizer minibatch. Contribution utility,
   decay `0.99`, replacement rate `1e-4`, and maturity threshold `100` are fixed

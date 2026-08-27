@@ -137,8 +137,8 @@ if [[ "$MODE" == "--preflight-only" ]]; then
 fi
 
 if [[ "$MODE" == "--resume-main" ]]; then
-  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-14 --time=10:00:00 \
-    --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
+  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-14 --time=20:00:00 \
+    --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp-50m \
     slurm/train_array.sbatch)"
   AGG_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${MAIN_JOB}" \
     slurm/aggregate.sbatch)"
@@ -148,8 +148,8 @@ if [[ "$MODE" == "--resume-main" ]]; then
   exit 0
 fi
 
-SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-2 --time=04:00:00 \
-  --export=ALL,BANYAN_MODE=smoke,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
+SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-2 --time=08:00:00 \
+  --export=ALL,BANYAN_MODE=smoke,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp-50m \
   slurm/train_array.sbatch)"
 echo "Submitted smoke array: $SMOKE_JOB"
 
@@ -160,9 +160,9 @@ fi
 
 GATE_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${SMOKE_JOB}" \
   slurm/smoke_gate.sbatch)"
-MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-14 --time=10:00:00 \
+MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-14 --time=20:00:00 \
   --dependency="afterok:${GATE_JOB}" \
-  --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
+  --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp-50m \
   slurm/train_array.sbatch)"
 AGG_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${MAIN_JOB}" \
   slurm/aggregate.sbatch)"
@@ -173,5 +173,5 @@ Submitted full 15-run array (held until gate passes): $MAIN_JOB
 Submitted final aggregation (held until all runs pass): $AGG_JOB
 Monitor with: squeue -u $USER -j ${SMOKE_JOB},${GATE_JOB},${MAIN_JOB},${AGG_JOB}
 The smoke jobs are the first phase of the three seed-0 main runs; their checkpoints are reused.
-If the smoke gate fails, inspect results/raw-cbp/smoke-gate.json; the main budget is not changed automatically.
+If the smoke gate fails, inspect results/raw-cbp-50m/smoke-gate.json; the main budget is not changed automatically.
 EOF

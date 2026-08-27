@@ -3,11 +3,11 @@ diversities = [1, 16, 256]
 seeds = [0, 1, 2, 3, 4]
 num_distributions = 4
 task_seed = 260600880
-steps_per_distribution = 25165824
-eval_interval_steps = 1048576
+steps_per_distribution = 50331648
+eval_interval_steps = 2097152
 eval_episodes = 1024
 diagnostic_fractions = [0.0, 0.5, 1.0]
-output_root = "results/raw-cbp"
+output_root = "results/raw-cbp-50m"
 
 [environment]
 grid_size = 9

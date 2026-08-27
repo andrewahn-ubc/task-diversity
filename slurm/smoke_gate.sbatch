@@ -17,5 +17,5 @@ source "$REPO_ROOT/.venv-narval/bin/activate"
 export PYTHONPATH="$REPO_ROOT/src"
 python -m banyan_pilot.smoke_gate \
   --config configs/main.toml \
-  --root results/raw-cbp \
-  --output results/raw-cbp/smoke-gate.json
+  --root results/raw-cbp-50m \
+  --output results/raw-cbp-50m/smoke-gate.json
