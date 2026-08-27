@@ -137,7 +137,7 @@ if [[ "$MODE" == "--preflight-only" ]]; then
 fi
 
 if [[ "$MODE" == "--resume-main" ]]; then
-  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=18:00:00 \
+  MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=15:00:00 \
     --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
     slurm/train_array.sbatch)"
   AGG_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${MAIN_JOB}" \
@@ -148,7 +148,7 @@ if [[ "$MODE" == "--resume-main" ]]; then
   exit 0
 fi
 
-SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-4 --time=07:00:00 \
+SMOKE_JOB="$(sbatch --parsable --account=def-mijungp --array=0-4 --time=05:30:00 \
   --export=ALL,BANYAN_MODE=smoke,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
   slurm/train_array.sbatch)"
 echo "Submitted smoke array: $SMOKE_JOB"
@@ -160,7 +160,7 @@ fi
 
 GATE_JOB="$(sbatch --parsable --account=def-mijungp --dependency="afterok:${SMOKE_JOB}" \
   slurm/smoke_gate.sbatch)"
-MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=18:00:00 \
+MAIN_JOB="$(sbatch --parsable --account=def-mijungp --array=0-24 --time=15:00:00 \
   --dependency="afterok:${GATE_JOB}" \
   --export=ALL,BANYAN_MODE=main,BANYAN_CONFIG=configs/main.toml,BANYAN_OUTPUT=results/raw-cbp \
   slurm/train_array.sbatch)"
