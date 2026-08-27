@@ -6,8 +6,8 @@ cd "$REPO_ROOT"
 
 MODE="${1:-all}"
 TRAIN_CHUNK_TIME="01:00:00"
-SMOKE_CHUNK_COUNT=6
-MAIN_CHUNK_COUNT=16
+SMOKE_CHUNK_COUNT=8
+MAIN_CHUNK_COUNT=21
 case "$MODE" in
   all|--preflight-only|--smoke-only|--resume-main) ;;
   *)
@@ -231,7 +231,7 @@ if [[ "$MODE" == "--resume-main" ]]; then
   MAIN_LAST_JOB="$CHAIN_LAST_JOB"
   submit_single_job "$MAIN_LAST_JOB" slurm/aggregate.sbatch
   AGG_JOB="$SINGLE_JOB"
-  echo "Submitted 16 one-hour main arrays: $MAIN_JOB_IDS"
+  echo "Submitted $MAIN_CHUNK_COUNT one-hour main arrays: $MAIN_JOB_IDS"
   echo "Submitted dependent aggregation: $AGG_JOB"
   echo "Monitor with: $(monitor_command)"
   SUBMISSION_COMPLETE=1
@@ -241,7 +241,7 @@ fi
 submit_training_chain smoke 0-4 "$SMOKE_CHUNK_COUNT" ""
 SMOKE_JOB_IDS="$CHAIN_JOB_IDS"
 SMOKE_LAST_JOB="$CHAIN_LAST_JOB"
-echo "Submitted 6 one-hour smoke arrays: $SMOKE_JOB_IDS"
+echo "Submitted $SMOKE_CHUNK_COUNT one-hour smoke arrays: $SMOKE_JOB_IDS"
 
 if [[ "$MODE" == "--smoke-only" ]]; then
   echo "Monitor with: $(monitor_command)"
@@ -259,11 +259,11 @@ AGG_JOB="$SINGLE_JOB"
 
 cat <<EOF
 Submitted smoke gate: $GATE_JOB
-Submitted 16 one-hour full-sweep arrays (held until the gate passes): $MAIN_JOB_IDS
+Submitted $MAIN_CHUNK_COUNT one-hour full-sweep arrays (held until the gate passes): $MAIN_JOB_IDS
 Submitted final aggregation (held until the final main chunk succeeds): $AGG_JOB
 Monitor with: $(monitor_command)
-The six smoke chunks allow 5 hours 42 minutes before checkpoint signals, preserving at least the previous 1.5x buffer.
-The sixteen main chunks allow 15 hours 12 minutes before checkpoint signals, preserving at least the previous 1.5x buffer.
+The eight smoke chunks allow 6 hours before checkpoint signals, exceeding the 5-hour-30-minute 1.5x target.
+The twenty-one main chunks allow 15 hours 45 minutes before checkpoint signals, exceeding the 15-hour 1.5x target.
 Every chunk is a distinct SLURM array job with a maximum one-hour time limit.
 The smoke jobs are the first phase of the five seed-0 main runs; their checkpoints are reused.
 If the smoke gate fails, inspect results/raw-cbp/smoke-gate.json; the main budget is not changed automatically.

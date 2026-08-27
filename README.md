@@ -53,14 +53,16 @@ bash scripts/narval_submit.sh --resume-main
 All training jobs are idempotent: completed runs exit immediately, and
 interrupted runs resume from `checkpoints/latest.pt`. Training is submitted as
 finite chains of distinct, dependent SLURM arrays, each capped at one hour. The
-smoke chain has 6 chunks and the main chain has 16. Three minutes before each
+smoke chain has 8 chunks and the main chain has 21. Fifteen minutes before each
 limit, an unfinished run saves its complete training state; the next array job
 then resumes it. Corresponding array elements are chained independently, so a
 policy does not wait for the slowest policy between chunks. The final chunk
 fails explicitly if the finite allocation budget is exhausted. Allowing for
-every checkpoint signal, the chains provide 5 hours 42 minutes for the smoke
-phase and 15 hours 12 minutes for the main run, preserving at least a 1.5x
-buffer over the 3-hour-40-minute and 10-hour planning estimates.
+every checkpoint signal, the chains provide 6 hours for the smoke phase and 15
+hours 45 minutes for the main run. This exceeds the respective 5-hour-30-minute
+and 15-hour targets obtained by applying a 1.5x buffer to the
+3-hour-40-minute and 10-hour planning estimates, while leaving ample time for
+an in-progress evaluation or gradient diagnostic to finish and checkpoint.
 
 ## Outputs
 

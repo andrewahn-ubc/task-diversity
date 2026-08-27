@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
 #SBATCH --time=01:00:00
-#SBATCH --signal=USR1@180
+#SBATCH --signal=USR1@900
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --output=logs/%x-%A_%a.out

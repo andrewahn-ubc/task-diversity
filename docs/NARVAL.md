@@ -13,16 +13,17 @@ documentation.
   with `--gpus=a100:1`.
 - Narval permits jobs up to 168 hours. Training is split into distinct,
   dependent array jobs, every one capped at one hour. An unfinished array task
-  receives `USR1` three minutes before the limit and saves a complete
+  receives `USR1` fifteen minutes before the limit and saves a complete
   checkpoint; the corresponding element of the next array resumes the same
   trajectory through an `aftercorr` dependency, without waiting for unrelated
-  policies. The smoke chain has 6 chunks (5 hours 42 minutes of pre-signal
-  runtime) and the main chain has 16 chunks (15 hours 12 minutes). These exceed
-  1.5x the respective 3-hour-40-minute and 10-hour planning estimates even
-  after all checkpoint margins. A final incomplete chunk exits nonzero rather
-  than continuing beyond the finite budget. `--requeue` remains enabled only
-  for scheduler or node fault recovery; normal time slicing uses the explicit
-  dependency chain.
+  policies. The smoke chain has 8 chunks (6 hours of pre-signal runtime) and
+  the main chain has 21 chunks (15 hours 45 minutes). These exceed the exact
+  1.5x targets of 5 hours 30 minutes and 15 hours, respectively, even after all
+  signal margins. The fifteen-minute margin allows an in-progress evaluation
+  or gradient diagnostic to finish before checkpointing. A final incomplete
+  chunk exits nonzero rather than continuing beyond the finite budget.
+  `--requeue` remains enabled only for scheduler or node fault recovery; normal
+  time slicing uses the explicit dependency chain.
 
 Sources: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en),
 [Slurm job-array dependencies](https://slurm.schedmd.com/job_array.html).
