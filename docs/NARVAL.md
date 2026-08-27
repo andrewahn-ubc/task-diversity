@@ -11,13 +11,21 @@ documentation.
   environments are blocked.
 - GPU nodes expose four 40GB NVIDIA A100 SXM4 GPUs. A full device is requested
   with `--gpus=a100:1`.
-- Narval permits jobs up to 168 hours. Every training allocation requests only
-  one hour. An unfinished array task receives `USR1` three minutes before
-  the limit, saves a complete checkpoint, and requeues itself. The next
-  allocation resumes the same trajectory, so the shorter scheduler request
-  does not reduce the experiment budget or the 1.5x runtime safety allowance.
+- Narval permits jobs up to 168 hours. Training is split into distinct,
+  dependent array jobs, every one capped at one hour. An unfinished array task
+  receives `USR1` three minutes before the limit and saves a complete
+  checkpoint; the corresponding element of the next array resumes the same
+  trajectory through an `aftercorr` dependency, without waiting for unrelated
+  policies. The smoke chain has 6 chunks (5 hours 42 minutes of pre-signal
+  runtime) and the main chain has 16 chunks (15 hours 12 minutes). These exceed
+  1.5x the respective 3-hour-40-minute and 10-hour planning estimates even
+  after all checkpoint margins. A final incomplete chunk exits nonzero rather
+  than continuing beyond the finite budget. `--requeue` remains enabled only
+  for scheduler or node fault recovery; normal time slicing uses the explicit
+  dependency chain.
 
-Source: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en).
+Sources: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en),
+[Slurm job-array dependencies](https://slurm.schedmd.com/job_array.html).
 
 ## Python installation path
 

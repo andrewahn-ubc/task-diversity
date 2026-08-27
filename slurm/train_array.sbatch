@@ -53,8 +53,11 @@ STATUS=$?
 set -e
 
 if [[ "$STATUS" -eq 75 ]]; then
-  echo "Checkpoint saved; requeuing ${SLURM_JOB_ID}."
-  scontrol requeue "$SLURM_JOB_ID"
+  if [[ "${BANYAN_FINAL_CHUNK:?}" == "1" ]]; then
+    echo "Checkpoint saved, but the finite ${BANYAN_CHUNK_COUNT:?}-chunk time budget was exhausted." >&2
+    exit 75
+  fi
+  echo "Checkpoint saved at chunk ${BANYAN_CHUNK_INDEX:?}/${BANYAN_CHUNK_COUNT:?}; the next dependent job will resume it."
   exit 0
 fi
 exit "$STATUS"

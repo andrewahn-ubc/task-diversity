@@ -112,14 +112,23 @@ aggregator joins it to phase-end success to obtain subsequent specialization.
 ## Compute choice
 
 Narval exposes 40GB A100 GPUs. Each run requests one full A100, 6 CPU cores,
-and 32GB RAM. Every scheduler allocation is limited to one hour. Three
-minutes before that limit, the run checkpoints the policy, optimizer, CBP,
-environment, recurrent state, and random generators, then requeues only that
-unfinished array task. The next allocation restores the same trajectory; it is
-not a new seed or policy. This keeps the previous 1.5x runtime safety allowance
-and permits further continuation if the estimate is low, while presenting
-short requests to the scheduler. The 25 primary conditions are a SLURM array,
-so elapsed time is governed by the slowest run rather than the sum of all seeds
-when capacity is available. The smoke array runs one full-budget phase for each
-seed-0 condition. Those five checkpoints are the corresponding main runs, so
-successful smoke computation is reused rather than discarded.
+and 32GB RAM. Training uses finite dependency chains of distinct SLURM array
+jobs, each limited to one hour. Three minutes before each limit, the run
+checkpoints the policy, optimizer, CBP, environment, recurrent state, and
+random generators. An intermediate chunk exits successfully and the next
+corresponding array element restores the same trajectory; it is not a new seed
+or policy. `aftercorr` dependencies let different policies advance through
+their chains independently. If a run remains incomplete at the final chunk,
+that array element fails so the gate or aggregation cannot accept a result
+that exceeded its time budget.
+
+The smoke chain contains 6 chunks. After reserving three minutes per chunk for
+checkpointing, it offers 5 hours 42 minutes against a 3-hour-40-minute planning
+estimate. The main chain contains 16 chunks and offers 15 hours 12 minutes
+against a 10-hour estimate. Rounding up this way keeps the effective safety
+allowance at least 1.5x despite the repeated checkpoint margins. The 25 primary
+conditions remain arrays, so elapsed time is governed by the slowest run rather
+than the sum of all seeds when capacity is available. The smoke arrays run one
+full-budget phase for each seed-0 condition. Those five checkpoints are the
+corresponding main runs, so successful smoke computation is reused rather than
+discarded.
