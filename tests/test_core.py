@@ -4,6 +4,7 @@ import unittest
 from dataclasses import replace
 from pathlib import PurePosixPath
 
+import numpy as np
 import torch
 
 from banyan_pilot.config import CBPConfig, load_config
@@ -13,6 +14,7 @@ from banyan_pilot.dependency_audit import audit_resolution
 from banyan_pilot.env import DROP, TOGGLE, VectorBanyan
 from banyan_pilot.model import RecurrentActorCritic
 from banyan_pilot.ppo import collect_rollout, gradient_cosines, update_ppo
+from banyan_pilot.reanalyze import _clustered_ols
 from banyan_pilot.taskgen import build_catalog
 
 
@@ -82,6 +84,23 @@ class PilotCoreTests(unittest.TestCase):
         report["install"][-1]["download_info"]["url"] = "file:///home/user/filelock.whl"
         with self.assertRaisesRegex(ValueError, "non-Alliance"):
             audit_resolution(report)
+
+    def test_clustered_ols_recovers_known_coefficient(self) -> None:
+        predictor = np.linspace(-1.0, 1.0, 50)
+        design = np.column_stack((np.ones(50), predictor))
+        outcome = 2.0 + 3.0 * predictor
+        clusters = np.repeat(np.arange(25), 2)
+        result = _clustered_ols(
+            design,
+            outcome,
+            clusters,
+            ("intercept", "predictor"),
+            intercept=True,
+        )
+        self.assertEqual(result["n_run_clusters"], 25)
+        self.assertAlmostEqual(
+            result["coefficients"]["predictor"]["estimate"], 3.0
+        )
 
     def test_unary_goal_success(self) -> None:
         task = next(

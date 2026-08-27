@@ -98,6 +98,21 @@ results/
     preflight-login.json
 ```
 
+## Post-hoc corrected analysis
+
+After copying a complete `results/raw-cbp` directory, the existing trajectories
+can be reanalysed without retraining:
+
+```bash
+python -m banyan_pilot.reanalyze
+```
+
+This writes `results/cbp/reanalysis/`, including a depth-6-only learning curve,
+per-transition and per-seed plots, shared/policy/value gradient diagnostics,
+temporally aligned half-phase outcomes, and run-clustered/fixed-effects
+summaries. The reanalysis is explicitly post hoc and does not replace the
+preregistered aggregate report.
+
 ## Focused local checks
 
 The core checks use the standard library's `unittest` runner:
