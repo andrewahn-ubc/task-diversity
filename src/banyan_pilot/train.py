@@ -31,6 +31,26 @@ class RequeueRequested:
     value = False
 
 
+def curriculum_state(
+    config: Config, phase_steps: int
+) -> tuple[int, float, bool]:
+    """Return active maximum depth, dead-end penalty, and bootstrap status."""
+    curriculum = config.curriculum
+    environment = config.environment
+    if not curriculum.enabled:
+        return environment.max_depth, -1.0, False
+    stage_count = environment.max_depth - environment.min_depth + 1
+    curriculum_steps = curriculum.stage_steps * stage_count
+    if phase_steps >= curriculum_steps:
+        return environment.max_depth, -1.0, False
+    stage = phase_steps // curriculum.stage_steps
+    maximum_depth = min(
+        environment.max_depth, environment.min_depth + int(stage)
+    )
+    penalty = 0.0 if curriculum.neutral_dead_end else -1.0
+    return maximum_depth, penalty, True
+
+
 def _handle_signal(signum: int, frame: Any) -> None:
     del signum, frame
     RequeueRequested.value = True
@@ -178,6 +198,28 @@ class Trainer:
         num_envs = min(self.config.diagnostics.num_envs, self.config.experiment.eval_episodes)
         return self._make_env(task_ids, seed, num_envs)
 
+    def _training_task_ids(self, phase: int, phase_steps: int) -> torch.Tensor:
+        maximum_depth, _, _ = curriculum_state(self.config, phase_steps)
+        task_ids = self.catalog.task_ids(phase, self.diversity)
+        depths = self.catalog.depths[task_ids]
+        selected = task_ids[depths <= maximum_depth]
+        if not len(selected):
+            raise RuntimeError("The active curriculum stage selected no tasks")
+        return selected
+
+    def _apply_curriculum(self, phase: int) -> tuple[int, float, bool]:
+        maximum_depth, penalty, active = curriculum_state(
+            self.config, self.phase_steps
+        )
+        desired = self._training_task_ids(phase, self.phase_steps).to(self.device)
+        pool_changed = not torch.equal(self.env.task_pool, desired)
+        self.env.dead_end_penalty = penalty
+        if pool_changed:
+            self.obs = self.env.set_task_pool(desired)
+            self.hidden.zero_()
+            self.episode_start.fill_(True)
+        return maximum_depth, penalty, active
+
     def _evaluation(self, phase: int, phase_steps: int, kind: str) -> dict[str, Any]:
         key = (phase, phase_steps, kind)
         if key in self.logged_evaluations:
@@ -192,6 +234,9 @@ class Trainer:
             episodes=self.config.experiment.eval_episodes,
             seed=eval_seed,
         )
+        training_depth, training_penalty, curriculum_active = curriculum_state(
+            self.config, phase_steps
+        )
         payload: dict[str, Any] = {
             "event": "evaluation",
             "kind": kind,
@@ -203,6 +248,9 @@ class Trainer:
             "total_env_steps": phase * self.config.experiment.steps_per_distribution
             + phase_steps,
             "wall_time_seconds": time.time() - self.started_at,
+            "training_max_depth": training_depth,
+            "training_dead_end_penalty": training_penalty,
+            "curriculum_active": curriculum_active,
             **result,
         }
         _jsonl_append(self.metrics_path, payload)
@@ -456,8 +504,10 @@ class Trainer:
             phase = self.phase
             if self.phase_steps == 0:
                 self.env.set_pools(
-                    self.catalog.task_ids(phase, self.diversity), self.layout_ids
+                    self._training_task_ids(phase, 0), self.layout_ids
                 )
+                _, penalty, _ = curriculum_state(self.config, 0)
+                self.env.dead_end_penalty = penalty
                 self.obs = self.env.observe()
                 self.hidden.zero_()
                 self.episode_start.fill_(True)
@@ -468,6 +518,9 @@ class Trainer:
                 int(round(fraction * target)) for fraction in self.config.experiment.diagnostic_fractions
             }
             while self.phase_steps < target:
+                training_depth, training_penalty, curriculum_active = (
+                    self._apply_curriculum(phase)
+                )
                 rollout = collect_rollout(
                     self.model,
                     self.env,
@@ -504,6 +557,9 @@ class Trainer:
                             "phase": phase + 1,
                             "phase_env_steps": self.phase_steps,
                             "total_env_steps": self.total_steps,
+                            "training_max_depth": training_depth,
+                            "training_dead_end_penalty": training_penalty,
+                            "curriculum_active": curriculum_active,
                             **losses,
                         },
                     )
@@ -601,7 +657,21 @@ def main() -> int:
             rollout_steps=min(16, config.diagnostics.rollout_steps),
             eval_episodes=min(64, config.diagnostics.eval_episodes),
         )
-        config = dataclasses.replace(config, experiment=experiment, diagnostics=diagnostics)
+        # --override-steps is a short mechanical smoke check.  A six-stage
+        # scientific curriculum cannot be compressed into one rollout without
+        # changing what it tests, so disable it only for this explicit override.
+        curriculum = dataclasses.replace(
+            config.curriculum,
+            enabled=False,
+            stage_steps=0,
+            neutral_dead_end=False,
+        )
+        config = dataclasses.replace(
+            config,
+            experiment=experiment,
+            diagnostics=diagnostics,
+            curriculum=curriculum,
+        )
     output_root = Path(args.output_root or config.experiment.output_root)
     device = _device_from_argument(args.device)
     _seed_everything(args.seed)

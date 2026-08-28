@@ -6,7 +6,7 @@ cd "$REPO_ROOT"
 
 MODE="${1:-all}"
 TRAIN_CHUNK_TIME="01:00:00"
-LEARNABILITY_CHUNK_COUNT=2
+LEARNABILITY_CHUNK_COUNT=4
 GPU_ACCOUNT="rrg-mijungp_gpu"
 CPU_ACCOUNT="def-mijungp_cpu"
 case "$MODE" in

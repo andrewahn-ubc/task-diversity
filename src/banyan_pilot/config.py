@@ -58,6 +58,13 @@ class CBPConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class CurriculumConfig:
+    enabled: bool
+    stage_steps: int
+    neutral_dead_end: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class DiagnosticConfig:
     num_envs: int
     rollout_steps: int
@@ -70,6 +77,7 @@ class Config:
     environment: EnvironmentConfig
     ppo: PPOConfig
     cbp: CBPConfig
+    curriculum: CurriculumConfig
     diagnostics: DiagnosticConfig
 
     def fingerprint(self) -> str:
@@ -95,7 +103,14 @@ def load_config(path: str | Path) -> Config:
     path = Path(path)
     with path.open("rb") as stream:
         raw = tomllib.load(stream)
-    expected = {"experiment", "environment", "ppo", "cbp", "diagnostics"}
+    expected = {
+        "experiment",
+        "environment",
+        "ppo",
+        "cbp",
+        "curriculum",
+        "diagnostics",
+    }
     if set(raw) != expected:
         raise ValueError(f"Config sections must be {sorted(expected)}, got {sorted(raw)}")
     config = Config(
@@ -103,6 +118,7 @@ def load_config(path: str | Path) -> Config:
         environment=_convert(EnvironmentConfig, raw["environment"]),
         ppo=_convert(PPOConfig, raw["ppo"]),
         cbp=_convert(CBPConfig, raw["cbp"]),
+        curriculum=_convert(CurriculumConfig, raw["curriculum"]),
         diagnostics=_convert(DiagnosticConfig, raw["diagnostics"]),
     )
     validate_config(config)
@@ -110,7 +126,13 @@ def load_config(path: str | Path) -> Config:
 
 
 def validate_config(config: Config) -> None:
-    exp, env, ppo, cbp = config.experiment, config.environment, config.ppo, config.cbp
+    exp, env, ppo, cbp, curriculum = (
+        config.experiment,
+        config.environment,
+        config.ppo,
+        config.cbp,
+        config.curriculum,
+    )
     if not exp.diversities or any(value < 1 for value in exp.diversities):
         raise ValueError("Diversity levels must be positive")
     if tuple(sorted(set(exp.diversities))) != tuple(exp.diversities):
@@ -138,5 +160,19 @@ def validate_config(config: Config) -> None:
         raise ValueError("CBP maturity_threshold must be nonnegative")
     if cbp.utility != "contribution":
         raise ValueError("CBP utility must be 'contribution'")
+    if curriculum.stage_steps < 0:
+        raise ValueError("Curriculum stage_steps must be nonnegative")
+    if curriculum.enabled:
+        if curriculum.stage_steps < batch_steps:
+            raise ValueError("An enabled curriculum stage must contain at least one PPO rollout")
+        if curriculum.stage_steps % batch_steps:
+            raise ValueError("Curriculum stage_steps must align to PPO rollout batches")
+        curriculum_steps = curriculum.stage_steps * (
+            env.max_depth - env.min_depth + 1
+        )
+        if curriculum_steps >= exp.steps_per_distribution:
+            raise ValueError(
+                "The curriculum must leave a nonempty all-depth, original-reward training period"
+            )
     if any(not 0.0 <= fraction <= 1.0 for fraction in exp.diagnostic_fractions):
         raise ValueError("Diagnostic fractions must be in [0, 1]")

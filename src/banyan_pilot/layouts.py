@@ -102,24 +102,18 @@ def _spread_slots(
     start: tuple[int, int],
     count: int,
 ) -> tuple[tuple[int, int], ...]:
-    candidates = [
-        cell
-        for cell in _distances(walls, size, start)
-        if cell != start
-    ]
-    selected: list[tuple[int, int]] = []
-    while len(selected) < count:
-        def score(cell: tuple[int, int]) -> tuple[int, int, int, int]:
-            start_distance = _distances(walls, size, start)[cell]
-            separation = min(
-                (_distances(walls, size, other)[cell] for other in selected),
-                default=start_distance,
-            )
-            return separation, start_distance, cell[0], cell[1]
-
-        choice = max((cell for cell in candidates if cell not in selected), key=score)
-        selected.append(choice)
-    return tuple(selected)
+    distances = _distances(walls, size, start)
+    candidates = [cell for cell in distances if cell != start]
+    if len(candidates) < count:
+        raise ValueError("Layout has too few reachable cells for object placement")
+    # The previous implementation deliberately maximized pairwise distance,
+    # placing the first two objects at opposite ends of a maze.  That turned a
+    # one-merge curriculum task into a long sparse-reward exploration problem.
+    # Banyan separates compositional depth from navigation diversity, so keep
+    # the fixed object set compact while walls still define the navigation
+    # problem and rotations provide controlled layout variation.
+    candidates.sort(key=lambda cell: (distances[cell], cell[0], cell[1]))
+    return tuple(candidates[:count])
 
 
 def _base_layout(

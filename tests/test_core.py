@@ -13,10 +13,12 @@ from banyan_pilot.continual_backprop import ContinualBackprop
 from banyan_pilot.dependency_audit import audit_resolution
 from banyan_pilot.env import DROP, TOGGLE, VectorBanyan
 from banyan_pilot.layouts import build_layout_catalog
+from banyan_pilot.learnability import summarize
 from banyan_pilot.model import RecurrentActorCritic
 from banyan_pilot.ppo import collect_rollout, evaluate_policy, gradient_cosines, update_ppo
 from banyan_pilot.reanalyze import _clustered_ols
 from banyan_pilot.taskgen import build_catalog
+from banyan_pilot.train import curriculum_state
 
 
 class PilotCoreTests(unittest.TestCase):
@@ -55,6 +57,43 @@ class PilotCoreTests(unittest.TestCase):
                 self.assertFalse(signatures[left] & signatures[right])
         topology_tasks = self.catalog.phase_topology_tasks[0][0]
         self.assertEqual([self.catalog.tasks[index].depth for index in topology_tasks], list(range(1, 7)))
+        for phase in range(4):
+            anchor = self.catalog.phase_topology_tasks[phase][0]
+            first = self.catalog.tasks[anchor[0]]
+            self.assertEqual(first.depth, 1)
+            self.assertEqual(len(first.binary_rules), 1)
+
+    def test_learnability_curriculum_leaves_original_reward_training(self) -> None:
+        config = load_config("configs/learnability.toml")
+        stage = config.curriculum.stage_steps
+        self.assertEqual(curriculum_state(config, 0), (1, 0.0, True))
+        self.assertEqual(curriculum_state(config, stage), (2, 0.0, True))
+        self.assertEqual(curriculum_state(config, 5 * stage), (6, 0.0, True))
+        self.assertEqual(curriculum_state(config, 6 * stage), (6, -1.0, False))
+        self.assertGreater(config.experiment.steps_per_distribution, 6 * stage)
+
+    def test_learnability_gate_requires_every_depth(self) -> None:
+        rows = []
+        for algorithm in ("ppo", "ppo_cbp"):
+            for diversity in (1, 4):
+                for run in range(4):
+                    row = {
+                        "algorithm": algorithm,
+                        "diversity": diversity,
+                        "phase_env_steps": 100,
+                        "success_rate": 0.2,
+                        "timeout_rate": 0.5,
+                        "effective_manipulation_rate": 0.1,
+                    }
+                    row.update(
+                        {f"success_depth_{depth}": 0.2 for depth in range(1, 7)}
+                    )
+                    rows.append(row)
+        self.assertEqual(summarize(rows, (1, 4), 100, 0.1)["status"], "pass")
+        for row in rows:
+            if row["algorithm"] == "ppo_cbp" and row["diversity"] == 1:
+                row["success_depth_3"] = 0.0
+        self.assertEqual(summarize(rows, (1, 4), 100, 0.1)["status"], "fail")
 
     def test_offline_dependency_report_rejects_non_wheelhouse_source(self) -> None:
         root = PurePosixPath("/cvmfs/soft.computecanada.ca/custom/python/wheelhouse")
@@ -121,17 +160,36 @@ class PilotCoreTests(unittest.TestCase):
             task for task in self.catalog.tasks
             if task.phase == 0 and task.depth == 1 and len(task.binary_rules) == 1
         )
-        env = self.make_env(torch.tensor([task.task_id]), num_envs=2)
+        env = self.make_env(torch.tensor([task.task_id]), num_envs=3)
         left, right, _ = task.binary_rules[0]
+        task_pairs = {(a, b) for a, b, _ in task.binary_rules}
+        globally_valid_wrong = next(
+            (a, b)
+            for a, b in (self.catalog.global_binary >= 0).nonzero().tolist()
+            if (a, b) not in task_pairs
+        )
+        globally_invalid = next(
+            (a, b)
+            for a in range(8)
+            for b in range(a, 8)
+            if self.catalog.global_binary[a, b] < 0
+        )
         env.objects[:] = -1
-        env.held[:] = torch.tensor([left, 6])
-        env.objects[:, 1, 1] = torch.tensor([right, 7])
-        _, reward, done, info = env.step(torch.tensor([DROP, DROP]))
+        env.held[:] = torch.tensor(
+            [left, globally_valid_wrong[0], globally_invalid[0]]
+        )
+        env.objects[:, 1, 1] = torch.tensor(
+            [right, globally_valid_wrong[1], globally_invalid[1]]
+        )
+        _, reward, done, info = env.step(torch.tensor([DROP, DROP, DROP]))
         self.assertTrue(info["success"][0].item())
         self.assertEqual(reward[0].item(), 1.0)
         self.assertTrue(info["dead_end"][1].item())
         self.assertEqual(reward[1].item(), -1.0)
-        self.assertTrue(done.all().item())
+        self.assertTrue(info["merge_invalid"][2].item())
+        self.assertFalse(done[2].item())
+        self.assertEqual(reward[2].item(), 0.0)
+        self.assertEqual(env.held[2].item(), globally_invalid[0])
 
     def test_layout_catalog_is_distinct_connected_and_checkpointed(self) -> None:
         layouts = build_layout_catalog(4, 9, 7, 260608799)
@@ -139,6 +197,10 @@ class PilotCoreTests(unittest.TestCase):
         self.assertEqual(
             len({walls.numpy().tobytes() for walls in layouts.walls}), 4
         )
+        for layout in range(4):
+            start = layouts.agent_starts[layout]
+            distances = (layouts.object_slots[layout] - start).abs().sum(dim=1)
+            self.assertLessEqual(int(distances.max()), 3)
         env = VectorBanyan(
             self.catalog,
             self.catalog.task_ids(0, 4),

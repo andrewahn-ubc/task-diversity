@@ -115,6 +115,38 @@ def _random_topology(depth: int, max_leaves: int, rng: random.Random) -> Node:
     return build(depth, max_leaves, True)
 
 
+def _curriculum_topology(depth: int, max_leaves: int, variant: int) -> Node:
+    """Build a nested anchor whose shallow task teaches object composition.
+
+    The random generator can place several unary transformations below the
+    first binary node.  With one topology, that means the depth-1 and depth-2
+    curriculum contains no pickup/drop/merge task at all.  Banyan relies on
+    nested shallow tasks to teach the operations required by deeper tasks, so
+    every distribution receives one deterministic anchor with a binary node at
+    depth 1.  Phase zero is a left-deep binary chain; later phases use distinct
+    unary/binary patterns while preserving the same curriculum property.
+    """
+    if depth < 1 or max_leaves < 2:
+        raise ValueError("A curriculum topology requires depth >= 1 and max_leaves >= 2")
+    patterns = (
+        (BINARY, BINARY, BINARY, BINARY, BINARY, BINARY),
+        (BINARY, UNARY, BINARY, UNARY, BINARY, UNARY),
+        (BINARY, BINARY, UNARY, BINARY, UNARY, BINARY),
+        (BINARY, UNARY, UNARY, BINARY, BINARY, UNARY),
+    )
+    pattern = patterns[variant % len(patterns)]
+    node = Node(LEAF, leaf_slot=0)
+    leaf_count = 1
+    for level in range(depth):
+        operation = pattern[level % len(pattern)]
+        if operation == BINARY and leaf_count < max_leaves:
+            node = Node(BINARY, (node, Node(LEAF, leaf_slot=leaf_count)))
+            leaf_count += 1
+        else:
+            node = Node(UNARY, (node,))
+    return node
+
+
 def _deepest_chain(root: Node) -> dict[int, Node]:
     chain: dict[int, Node] = {root.depth: root}
     node = root
@@ -207,8 +239,17 @@ class TaskCatalog:
         self.seed = seed
         total = num_phases * max_diversity
         rng = random.Random(seed)
-        roots: list[Node] = []
-        signatures: set[str] = set()
+        # Round-robin assignment below maps global indices 0..num_phases-1 to
+        # the first topology in each phase.  Seed that prefix with controlled,
+        # curriculum-friendly anchors before filling the remaining catalog
+        # with random topologies.
+        roots = [
+            _curriculum_topology(max_depth, max_leaves, phase)
+            for phase in range(num_phases)
+        ]
+        signatures = {root.signature() for root in roots}
+        if len(signatures) != len(roots):
+            raise AssertionError("Curriculum anchor topologies must be phase-distinct")
         attempts = 0
         while len(roots) < total:
             attempts += 1
@@ -275,6 +316,26 @@ class TaskCatalog:
                 self.binary[task.task_id, : len(task.binary_rules)] = torch.tensor(task.binary_rules)
             self.roots[task.task_id] = task.root_object
             self.depths[task.task_id] = task.depth
+        # Dead ends are defined relative to the global dynamics, not merely
+        # the current task recipe.  An operation absent from these tables is
+        # physically invalid and therefore a no-op.  An operation present
+        # globally but absent from the current task is a valid transformation
+        # that makes that task unsolvable and should terminate with -1.
+        self.global_unary = torch.full((OBJECT_COUNT,), -1, dtype=torch.int64)
+        self.global_binary = torch.full(
+            (OBJECT_COUNT, OBJECT_COUNT), -1, dtype=torch.int64
+        )
+        for task in self.tasks:
+            for source, target in task.unary_rules:
+                existing = int(self.global_unary[source])
+                if existing not in (-1, target):
+                    raise AssertionError("Unary dynamics are inconsistent across tasks")
+                self.global_unary[source] = target
+            for left, right, target in task.binary_rules:
+                existing = int(self.global_binary[left, right])
+                if existing not in (-1, target):
+                    raise AssertionError("Binary dynamics are inconsistent across tasks")
+                self.global_binary[left, right] = target
 
     def task_ids(self, phase: int, diversity: int) -> torch.Tensor:
         if not 0 <= phase < self.num_phases:

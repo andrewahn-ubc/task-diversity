@@ -20,5 +20,5 @@ export MPLCONFIGDIR="${SLURM_TMPDIR}/matplotlib"
 mkdir -p "$MPLCONFIGDIR"
 python -m banyan_pilot.learnability \
   --config configs/learnability.toml \
-  --root results/learnability/raw \
-  --output results/learnability/analysis
+  --root results/learnability-fixed/raw \
+  --output results/learnability-fixed/analysis

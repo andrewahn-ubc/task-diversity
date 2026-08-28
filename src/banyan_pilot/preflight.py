@@ -103,6 +103,18 @@ def run_preflight(
         for right in range(left + 1, len(phase_sets)):
             if phase_sets[left] & phase_sets[right]:
                 raise RuntimeError(f"Topology overlap between phases {left + 1} and {right + 1}")
+    for phase in range(config.experiment.num_distributions):
+        anchor_id = catalog.phase_topology_tasks[phase][0][0]
+        anchor = catalog.tasks[anchor_id]
+        if anchor.depth != config.environment.min_depth or len(anchor.binary_rules) != 1:
+            raise RuntimeError(
+                f"Phase {phase + 1} does not begin with a one-merge curriculum task"
+            )
+    slot_distances = (
+        layout_catalog.object_slots - layout_catalog.agent_starts[:, None, :]
+    ).abs().sum(dim=2)
+    if int(slot_distances.max()) > 3:
+        raise RuntimeError("Object placement is not compact enough for the merge curriculum")
     probe_env = VectorBanyan(
         catalog,
         catalog.task_ids(0, 1),
@@ -204,6 +216,13 @@ def run_preflight(
             config.experiment.steps_per_distribution
             // (config.environment.num_envs * config.ppo.rollout_steps)
         ),
+        "curriculum_enabled": config.curriculum.enabled,
+        "curriculum_stage_steps": config.curriculum.stage_steps,
+        "curriculum_total_steps": config.curriculum.stage_steps
+        * (config.environment.max_depth - config.environment.min_depth + 1),
+        "curriculum_neutral_dead_end": config.curriculum.neutral_dead_end,
+        "anchor_depth1_binary": True,
+        "maximum_object_slot_manhattan_distance": int(slot_distances.max()),
         "cuda_required": require_cuda,
         "cuda_available": torch.cuda.is_available(),
         "torch_cuda": torch.version.cuda,

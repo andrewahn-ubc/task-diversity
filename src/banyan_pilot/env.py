@@ -51,6 +51,7 @@ class VectorBanyan:
         seed: int,
         layout_catalog: LayoutCatalog | None = None,
         layout_ids: torch.Tensor | None = None,
+        dead_end_penalty: float = -1.0,
     ) -> None:
         if grid_size < 7:
             raise ValueError("grid_size must be at least 7")
@@ -59,6 +60,7 @@ class VectorBanyan:
         self.num_envs = num_envs
         self.grid_size = grid_size
         self.max_episode_steps = max_episode_steps
+        self.dead_end_penalty = float(dead_end_penalty)
         self.task_pool = task_ids.to(device)
         self.layout_catalog = layout_catalog or build_fixed_layout_catalog(
             grid_size, catalog.max_leaves
@@ -80,6 +82,8 @@ class VectorBanyan:
         self.catalog_leaves = catalog.leaves.to(device)
         self.catalog_unary = catalog.unary.to(device)
         self.catalog_binary = catalog.binary.to(device)
+        self.catalog_global_unary = catalog.global_unary.to(device)
+        self.catalog_global_binary = catalog.global_binary.to(device)
         self.catalog_roots = catalog.roots.to(device)
         self.catalog_depths = catalog.depths.to(device)
         self.objects = torch.full(
@@ -193,6 +197,7 @@ class VectorBanyan:
         self.held[empty_drop] = -1
         merge = drop & (cell >= 0)
         valid_merge = torch.zeros_like(success)
+        invalid_merge = torch.zeros_like(success)
         if merge.any():
             merge_ids = env_ids[merge]
             left = torch.minimum(self.held[merge], cell[merge])
@@ -208,10 +213,16 @@ class VectorBanyan:
                 self.held[valid_ids] = -1
                 success[valid_ids] = output[found] == self.root[valid_ids]
                 valid_merge[valid_ids] = True
-            dead_end[merge_ids[~found]] = True
+            missing_ids = merge_ids[~found]
+            if len(missing_ids):
+                global_output = self.catalog_global_binary[left[~found], right[~found]]
+                globally_valid = global_output >= 0
+                dead_end[missing_ids[globally_valid]] = True
+                invalid_merge[missing_ids[~globally_valid]] = True
 
         toggle = (actions == TOGGLE) & (cell >= 0)
         valid_toggle = torch.zeros_like(success)
+        invalid_toggle = torch.zeros_like(success)
         if toggle.any():
             toggle_ids = env_ids[toggle]
             rules = self.catalog_unary[self.task_index[toggle]]
@@ -224,13 +235,17 @@ class VectorBanyan:
                 self.objects[valid_ids, row[valid_ids], col[valid_ids]] = output[found]
                 success[valid_ids] = output[found] == self.root[valid_ids]
                 valid_toggle[valid_ids] = True
-            dead_end[toggle_ids[~found]] = True
+            missing_ids = toggle_ids[~found]
+            if len(missing_ids):
+                globally_valid = self.catalog_global_unary[cell[toggle][~found]] >= 0
+                dead_end[missing_ids[globally_valid]] = True
+                invalid_toggle[missing_ids[~globally_valid]] = True
 
         self.elapsed += 1
         timeout = (self.elapsed >= self.max_episode_steps) & ~success & ~dead_end
         done = success | dead_end | timeout
         rewards[success] = 1.0
-        rewards[dead_end] = -1.0
+        rewards[dead_end] = self.dead_end_penalty
         info = {
             "success": success.clone(),
             "dead_end": dead_end.clone(),
@@ -243,6 +258,8 @@ class VectorBanyan:
             "drop_effective": (empty_drop | valid_merge).clone(),
             "merge_effective": valid_merge.clone(),
             "toggle_effective": valid_toggle.clone(),
+            "merge_invalid": invalid_merge.clone(),
+            "toggle_invalid": invalid_toggle.clone(),
         }
         self.reset(done)
         return self.observe(), rewards, done, info

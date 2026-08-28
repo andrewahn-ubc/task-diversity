@@ -39,7 +39,9 @@ bash scripts/narval_submit.sh --resume
 ```
 
 Every training allocation is capped at one hour. A checkpoint signal arrives
-at 45 minutes; a second corresponding array job resumes any unfinished run.
+at 45 minutes; four corresponding array jobs provide up to 180 minutes of
+training time while preserving the one-hour scheduling cap. Each later array
+element resumes the exact RNG, environment, model, optimizer, and CBP state.
 Completed runs exit without changing their results.
 
 ## What changed relative to the earlier pilot
@@ -58,11 +60,21 @@ Completed runs exit without changing their results.
   pickup/drop/merge/toggle, and depth-specific rates.
 - Plain PPO isolates whether the custom recurrent CBP extension prevents
   first-distribution learning, where loss of plasticity is not yet relevant.
+- The first 50,331,648 transitions form a finite depth curriculum: 8,388,608
+  transitions each at maximum depths 1 through 6. During only this bootstrap,
+  dead ends terminate the episode but have reward 0, preventing an
+  undiscovered merge from teaching the policy to avoid all manipulation.
+- The final 50,331,648 transitions train on all depths with the original
+  `+1` success / `-1` dead-end reward. Every evaluation uses all six depths and
+  the original reward, including evaluations during the bootstrap.
+- Every distribution begins with a nested binary-composition anchor, and
+  object slots are within three moves of the start. This tests composition
+  before adding a long navigation/exploration confound.
 
 ## Outputs
 
 ```text
-results/learnability/
+results/learnability-fixed/
   raw/
     {ppo,ppo_cbp}/catalog_{260600880,260600881}/n{1,4}/seed_{0,1}/
       run.json
@@ -79,9 +91,10 @@ results/learnability/
     report.md
 ```
 
-The gate passes only if PPO+CBP reaches mean endpoint depth-6 success of at
-least 0.10 at both diversity levels and at least three of four run clusters per
-level reach 0.05. It is diagnostic only and controls no downstream submission.
+The gate passes only if PPO+CBP reaches mean endpoint success of at least 0.10
+at every depth 1 through 6, at both diversity levels, and at least three of
+four run clusters per depth and diversity reach 0.05. It is diagnostic only
+and controls no downstream submission.
 
 ## Focused local checks
 

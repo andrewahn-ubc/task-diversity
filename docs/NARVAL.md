@@ -15,12 +15,15 @@ documentation.
   CPU-only gate and aggregation jobs use `def-mijungp_cpu`. The unsuffixed
   `rrg-mijungp` name is not assumed: before submitting, the launcher requires
   both selected accounts to appear in the current user's live `sshare` report.
-- Training is split into two corresponding array jobs, each capped at one
+- Training is split into four corresponding array jobs, each capped at one
   hour. An unfinished task receives `USR1` fifteen minutes before the limit and
-  saves a complete checkpoint; its element of the second array resumes through
-  an `aftercorr` dependency without waiting for unrelated policies. The two
-  chunks provide 90 minutes of pre-signal runtime. A final incomplete chunk
-  exits nonzero. No smoke, main, or continual array is submitted.
+  saves a complete checkpoint; its element of the next array resumes through
+  an `aftercorr` dependency without waiting for unrelated policies. The four
+  chunks provide 180 minutes of pre-signal runtime. Prior measurements put the
+  slowest run below roughly 108 minutes, so this retains at least a 1.67x
+  observed-runtime margin while keeping every allocation at one hour. A final
+  incomplete chunk exits nonzero. No smoke, main, or continual array is
+  submitted.
 
 Sources: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en),
 [Slurm job-array dependencies](https://slurm.schedmd.com/job_array.html).

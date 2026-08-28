@@ -7,7 +7,7 @@ steps_per_distribution = 100663296
 eval_interval_steps = 2097152
 eval_episodes = 1536
 diagnostic_fractions = []
-output_root = "results/learnability/raw"
+output_root = "results/learnability-fixed/raw"
 
 [environment]
 grid_size = 9
@@ -38,6 +38,11 @@ replacement_rate = 0.0001
 decay_rate = 0.99
 maturity_threshold = 100
 utility = "contribution"
+
+[curriculum]
+enabled = true
+stage_steps = 8388608
+neutral_dead_end = true
 
 [diagnostics]
 num_envs = 256

@@ -39,6 +39,11 @@ decay_rate = 0.99
 maturity_threshold = 100
 utility = "contribution"
 
+[curriculum]
+enabled = false
+stage_steps = 0
+neutral_dead_end = false
+
 [diagnostics]
 num_envs = 256
 rollout_steps = 128

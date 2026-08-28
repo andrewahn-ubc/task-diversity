@@ -45,7 +45,7 @@ CATALOG_SEED="${CATALOG_SEEDS[$((INDEX % ${#CATALOG_SEEDS[@]}))]}"
 INDEX=$((INDEX / ${#CATALOG_SEEDS[@]}))
 ALGORITHM="${ALGORITHMS[$INDEX]}"
 
-OUTPUT_ROOT="results/learnability/raw/${ALGORITHM}/catalog_${CATALOG_SEED}"
+OUTPUT_ROOT="results/learnability-fixed/raw/${ALGORITHM}/catalog_${CATALOG_SEED}"
 set +e
 srun --ntasks=1 python -m banyan_pilot.train \
   --config "$CONFIG" \

@@ -205,7 +205,7 @@ def summarize(
     rows: list[dict[str, Any]],
     diversities: tuple[int, ...],
     target_steps: int,
-    minimum_depth6: float,
+    minimum_per_depth: float,
 ) -> dict[str, Any]:
     endpoints = [row for row in rows if int(row["phase_env_steps"]) == target_steps]
     conditions: list[dict[str, Any]] = []
@@ -215,7 +215,18 @@ def summarize(
                 row for row in endpoints
                 if row["algorithm"] == algorithm and int(row["diversity"]) == diversity
             ]
-            depth6 = np.array([float(row["success_depth_6"]) for row in selected])
+            if len(selected) != 4:
+                raise RuntimeError(
+                    f"Expected four endpoint runs for {algorithm}, n={diversity}; "
+                    f"found {len(selected)}"
+                )
+            depth_success = {
+                depth: np.array(
+                    [float(row[f"success_depth_{depth}"]) for row in selected]
+                )
+                for depth in range(1, 7)
+            }
+            depth6 = depth_success[6]
             conditions.append(
                 {
                     "algorithm": algorithm,
@@ -228,6 +239,14 @@ def summarize(
                     "mean_depth6_success": float(depth6.mean()),
                     "depth6_success_by_run": depth6.tolist(),
                     "fraction_depth6_at_least_0.05": float(np.mean(depth6 >= 0.05)),
+                    "mean_success_by_depth": {
+                        str(depth): float(values.mean())
+                        for depth, values in depth_success.items()
+                    },
+                    "fraction_at_least_0.05_by_depth": {
+                        str(depth): float(np.mean(values >= 0.05))
+                        for depth, values in depth_success.items()
+                    },
                     "mean_timeout_rate": float(
                         np.mean([float(row["timeout_rate"]) for row in selected])
                     ),
@@ -240,18 +259,22 @@ def summarize(
             )
     primary = [row for row in conditions if row["algorithm"] == "ppo_cbp"]
     passed = all(
-        row["mean_depth6_success"] >= minimum_depth6
-        and row["fraction_depth6_at_least_0.05"] >= 0.75
+        all(
+            row["mean_success_by_depth"][str(depth)] >= minimum_per_depth
+            and row["fraction_at_least_0.05_by_depth"][str(depth)] >= 0.75
+            for depth in range(1, 7)
+        )
         for row in primary
     )
     return {
         "status": "pass" if passed else "fail",
         "purpose": "single-distribution depth-6 learnability gate; launches no continual jobs",
         "criterion": (
-            f"For PPO+CBP at every diversity, mean endpoint depth-6 success >= "
-            f"{minimum_depth6:.2f} and at least 3/4 runs have depth-6 success >= 0.05"
+            f"For PPO+CBP at every diversity and every depth 1-6, mean endpoint "
+            f"success >= {minimum_per_depth:.2f} and at least 3/4 runs have "
+            "success >= 0.05"
         ),
-        "minimum_mean_depth6_success": minimum_depth6,
+        "minimum_mean_success_per_depth": minimum_per_depth,
         "conditions": conditions,
     }
 
@@ -266,16 +289,23 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         "The gate is diagnostic only. No continual sweep is submitted regardless of its result.",
         "",
-        "| Algorithm | n | Layout-topology pairs | Overall | Depth 6 | Timeout | Effective manipulation |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Algorithm | n | Pairs | Overall | D1 | D2 | D3 | D4 | D5 | D6 | Timeout | Effective manipulation |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summary["conditions"]:
         label = "PPO" if row["algorithm"] == "ppo" else "PPO + CBP"
-        lines.append(
+        depths = row["mean_success_by_depth"]
+        prefix = (
             f"| {label} | {row['diversity']} | {row['unique_layout_topology_pairs']} | "
-            f"{row['mean_overall_success']:.3f} | {row['mean_depth6_success']:.3f} | "
+            f"{row['mean_overall_success']:.3f} | "
+        )
+        depth_cells = " | ".join(
+            f"{depths[str(depth)]:.3f}" for depth in range(1, 7)
+        )
+        suffix = (
             f"{row['mean_timeout_rate']:.3f} | {row['mean_effective_manipulation_rate']:.4f} |"
         )
+        lines.append(prefix + depth_cells + " | " + suffix)
     lines.extend(
         (
             "",
@@ -292,11 +322,11 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="results/learnability/raw")
-    parser.add_argument("--output", default="results/learnability/analysis")
+    parser.add_argument("--root", default="results/learnability-fixed/raw")
+    parser.add_argument("--output", default="results/learnability-fixed/analysis")
     parser.add_argument("--config", default="configs/learnability.toml")
     parser.add_argument("--catalog-seeds", default=",".join(map(str, CATALOG_SEEDS)))
-    parser.add_argument("--minimum-depth6", type=float, default=0.10)
+    parser.add_argument("--minimum-per-depth", type=float, default=0.10)
     args = parser.parse_args()
     config_path = Path(args.config)
     config = load_config(config_path)
@@ -343,7 +373,7 @@ def main() -> int:
         rows,
         diversities,
         config.experiment.steps_per_distribution,
-        args.minimum_depth6,
+        args.minimum_per_depth,
     )
     (output / "learnability_gate.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
