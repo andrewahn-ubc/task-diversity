@@ -1,0 +1,45 @@
+[experiment]
+diversities = [1, 4]
+seeds = [0, 1]
+num_distributions = 1
+task_seed = 260600880
+steps_per_distribution = 100663296
+eval_interval_steps = 2097152
+eval_episodes = 1536
+diagnostic_fractions = []
+output_root = "results/learnability/raw"
+
+[environment]
+grid_size = 9
+max_depth = 6
+min_depth = 1
+max_leaves = 7
+object_feature_dim = 16
+max_episode_steps = 192
+num_envs = 256
+
+[ppo]
+rollout_steps = 256
+update_epochs = 2
+minibatch_envs = 64
+learning_rate = 0.00025
+gamma = 0.99
+gae_lambda = 0.95
+clip_coef = 0.2
+value_coef = 0.5
+entropy_coef = 0.01
+max_grad_norm = 0.5
+hidden_size = 256
+checkpoint_interval_updates = 32
+
+[cbp]
+enabled = true
+replacement_rate = 0.0001
+decay_rate = 0.99
+maturity_threshold = 100
+utility = "contribution"
+
+[diagnostics]
+num_envs = 256
+rollout_steps = 256
+eval_episodes = 1536

@@ -111,18 +111,25 @@ def load_config(path: str | Path) -> Config:
 
 def validate_config(config: Config) -> None:
     exp, env, ppo, cbp = config.experiment, config.environment, config.ppo, config.cbp
-    if tuple(exp.diversities) != (1, 4, 16, 64, 256):
-        raise ValueError(
-            "Primary diversity levels must remain exactly (1, 4, 16, 64, 256)"
-        )
-    if exp.num_distributions != 4:
-        raise ValueError("The pilot requires exactly four distributions")
+    if not exp.diversities or any(value < 1 for value in exp.diversities):
+        raise ValueError("Diversity levels must be positive")
+    if tuple(sorted(set(exp.diversities))) != tuple(exp.diversities):
+        raise ValueError("Diversity levels must be unique and increasing")
+    if not exp.seeds or len(set(exp.seeds)) != len(exp.seeds):
+        raise ValueError("Training seeds must be nonempty and unique")
+    if exp.num_distributions < 1:
+        raise ValueError("num_distributions must be positive")
     if not 1 <= env.min_depth <= env.max_depth:
         raise ValueError("Invalid depth range")
     if exp.steps_per_distribution < ppo.rollout_steps * env.num_envs:
         raise ValueError("Each phase must contain at least one PPO rollout")
     if ppo.minibatch_envs > env.num_envs or env.num_envs % ppo.minibatch_envs:
         raise ValueError("minibatch_envs must evenly divide num_envs")
+    batch_steps = ppo.rollout_steps * env.num_envs
+    if exp.steps_per_distribution % batch_steps:
+        raise ValueError("steps_per_distribution must contain complete PPO rollout batches")
+    if exp.eval_interval_steps % batch_steps:
+        raise ValueError("eval_interval_steps must align to PPO rollout batches")
     if not 0.0 <= cbp.replacement_rate <= 1.0:
         raise ValueError("CBP replacement_rate must be in [0, 1]")
     if not 0.0 <= cbp.decay_rate < 1.0:

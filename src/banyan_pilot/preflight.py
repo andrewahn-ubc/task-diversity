@@ -18,6 +18,7 @@ from .config import load_config
 from .continual_adam import ContinualAdam
 from .continual_backprop import ContinualBackprop
 from .env import VectorBanyan
+from .layouts import build_layout_catalog
 from .model import RecurrentActorCritic
 from .taskgen import build_catalog
 
@@ -79,6 +80,17 @@ def run_preflight(
         config.environment.max_leaves,
         config.experiment.task_seed,
     )
+    layout_catalog = build_layout_catalog(
+        max(config.experiment.diversities),
+        config.environment.grid_size,
+        config.environment.max_leaves,
+        config.experiment.task_seed + 7_919,
+    )
+    layout_signatures = {
+        layout.cpu().numpy().tobytes() for layout in layout_catalog.walls
+    }
+    if len(layout_signatures) != max(config.experiment.diversities):
+        raise RuntimeError("Layout generator did not produce the requested distinct layouts")
     phase_sets = [
         {
             catalog.tasks[int(task_id)].topology_signature
@@ -132,7 +144,7 @@ def run_preflight(
         grid_size=config.environment.grid_size,
         object_feature_dim=config.environment.object_feature_dim,
         hidden_size=32,
-        walls=probe_env.walls,
+        walls=probe_env.walls[0],
     ).to(device)
     logits, values, hidden = probe_model.forward_step(
         obs,
@@ -184,6 +196,14 @@ def run_preflight(
         "config_fingerprint": config.fingerprint(),
         "catalog_tasks": len(catalog.tasks),
         "topologies_per_phase": [len(items) for items in catalog.phase_topology_tasks],
+        "available_layouts": layout_catalog.count,
+        "rollout_batch_env_steps": (
+            config.environment.num_envs * config.ppo.rollout_steps
+        ),
+        "ppo_updates_per_distribution": (
+            config.experiment.steps_per_distribution
+            // (config.environment.num_envs * config.ppo.rollout_steps)
+        ),
         "cuda_required": require_cuda,
         "cuda_available": torch.cuda.is_available(),
         "torch_cuda": torch.version.cuda,

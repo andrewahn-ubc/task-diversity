@@ -15,19 +15,12 @@ documentation.
   CPU-only gate and aggregation jobs use `def-mijungp_cpu`. The unsuffixed
   `rrg-mijungp` name is not assumed: before submitting, the launcher requires
   both selected accounts to appear in the current user's live `sshare` report.
-- Narval permits jobs up to 168 hours. Training is split into distinct,
-  dependent array jobs, every one capped at one hour. An unfinished array task
-  receives `USR1` fifteen minutes before the limit and saves a complete
-  checkpoint; the corresponding element of the next array resumes the same
-  trajectory through an `aftercorr` dependency, without waiting for unrelated
-  policies. The smoke chain has 8 chunks (6 hours of pre-signal runtime) and
-  the main chain has 21 chunks (15 hours 45 minutes). These exceed the exact
-  1.5x targets of 5 hours 30 minutes and 15 hours, respectively, even after all
-  signal margins. The fifteen-minute margin allows an in-progress evaluation
-  or gradient diagnostic to finish before checkpointing. A final incomplete
-  chunk exits nonzero rather than continuing beyond the finite budget.
-  `--requeue` remains enabled only for scheduler or node fault recovery; normal
-  time slicing uses the explicit dependency chain.
+- Training is split into two corresponding array jobs, each capped at one
+  hour. An unfinished task receives `USR1` fifteen minutes before the limit and
+  saves a complete checkpoint; its element of the second array resumes through
+  an `aftercorr` dependency without waiting for unrelated policies. The two
+  chunks provide 90 minutes of pre-signal runtime. A final incomplete chunk
+  exits nonzero. No smoke, main, or continual array is submitted.
 
 Sources: [Alliance Narval documentation](https://docs.alliancecan.ca/wiki/Narval/en),
 [Slurm job-array dependencies](https://slurm.schedmd.com/job_array.html).
@@ -62,7 +55,7 @@ Only three top-level packages are installed:
 |---|---:|---|
 | PyTorch | 2.6.0 | PPO, the vector environment, GPU execution, and autograd diagnostics |
 | NumPy | 1.26.4 | aggregation and deterministic catalog helpers |
-| Matplotlib | 3.9.2 | the five required figures |
+| Matplotlib | 3.9.2 | the four diagnostic figures |
 
 The Alliance Python 3.11 wheel catalog lists all three exact versions. PyTorch
 2.6 officially supports Python 3.13 in addition to earlier supported versions,
@@ -97,7 +90,8 @@ these pass:
 4. an actual wheels-only `pip install --no-index` of the exact pins;
 5. `pip check`, exact direct-version checks, and a check that Torch is a CUDA
    build;
-6. CPU imports and a deterministic 6,144-task catalog/environment probe; and
+6. CPU imports, deterministic task/layout catalogs, distinct connected layouts,
+   exact PPO update-count validation, and an environment probe; and
 7. on every allocated GPU, CUDA availability, A100 `sm_80` kernel support,
    catalog disjointness, environment and PPO RNG checkpoint restoration, an
    environment step, a real convolution/GRU

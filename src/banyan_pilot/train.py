@@ -18,6 +18,7 @@ from .config import Config, load_config
 from .continual_adam import ContinualAdam
 from .continual_backprop import ContinualBackprop
 from .env import CompactObs, VectorBanyan
+from .layouts import LayoutCatalog, build_layout_catalog
 from .model import RecurrentActorCritic
 from .ppo import collect_rollout, evaluate_policy, gradient_cosines, update_ppo
 from .taskgen import TaskCatalog, build_catalog
@@ -82,11 +83,21 @@ class Trainer:
         seed: int,
         output_root: Path,
         device: torch.device,
+        algorithm: str | None = None,
+        catalog_seed: int | None = None,
+        vary_layout: bool = False,
     ) -> None:
         self.config = config
         self.diversity = diversity
         self.seed = seed
         self.device = device
+        self.algorithm = algorithm or ("ppo_cbp" if config.cbp.enabled else "ppo")
+        if self.algorithm not in {"ppo", "ppo_cbp"}:
+            raise ValueError(f"Unsupported algorithm {self.algorithm!r}")
+        if self.algorithm == "ppo_cbp" and not config.cbp.enabled:
+            raise ValueError("PPO + CBP was requested, but the config disables CBP")
+        self.catalog_seed = config.experiment.task_seed if catalog_seed is None else catalog_seed
+        self.vary_layout = vary_layout
         if diversity not in config.experiment.diversities:
             raise ValueError(f"Diversity {diversity} is not configured")
         if seed not in config.experiment.seeds:
@@ -102,18 +113,28 @@ class Trainer:
             max(config.experiment.diversities),
             config.environment.max_depth,
             config.environment.max_leaves,
-            config.experiment.task_seed,
+            self.catalog_seed,
         )
-        env_seed = 10_000_019 * seed + 1009 * diversity + config.experiment.task_seed
+        layout_count = max(config.experiment.diversities) if vary_layout else 1
+        self.layout_catalog: LayoutCatalog = build_layout_catalog(
+            layout_count,
+            config.environment.grid_size,
+            config.environment.max_leaves,
+            self.catalog_seed + 7_919,
+        )
+        self.layout_ids = torch.arange(
+            diversity if vary_layout else 1, dtype=torch.int64
+        )
+        env_seed = 10_000_019 * seed + 1009 * diversity + self.catalog_seed
         initial_ids = self.catalog.task_ids(0, diversity)
         self.env = self._make_env(initial_ids, env_seed, config.environment.num_envs)
         self.model = RecurrentActorCritic(
             grid_size=config.environment.grid_size,
             object_feature_dim=config.environment.object_feature_dim,
             hidden_size=config.ppo.hidden_size,
-            walls=self.env.walls,
+            walls=self.env.walls[0],
         ).to(device)
-        if config.cbp.enabled:
+        if self.algorithm == "ppo_cbp":
             self.optimizer: torch.optim.Optimizer = ContinualAdam(
                 self.model.parameters(), lr=config.ppo.learning_rate, eps=1e-5
             )
@@ -149,6 +170,8 @@ class Trainer:
             max_episode_steps=self.config.environment.max_episode_steps,
             device=self.device,
             seed=seed,
+            layout_catalog=self.layout_catalog,
+            layout_ids=self.layout_ids,
         )
 
     def _eval_factory(self, task_ids: torch.Tensor, seed: int) -> VectorBanyan:
@@ -174,6 +197,7 @@ class Trainer:
             "kind": kind,
             "seed": self.seed,
             "diversity": self.diversity,
+            **self.run_identity(),
             "phase": phase + 1,
             "phase_env_steps": phase_steps,
             "total_env_steps": phase * self.config.experiment.steps_per_distribution
@@ -201,6 +225,7 @@ class Trainer:
             "kind": "phase_end_d1",
             "seed": self.seed,
             "diversity": self.diversity,
+            **self.run_identity(),
             "phase": 1,
             "after_phase": after_phase + 1,
             "total_env_steps": (after_phase + 1)
@@ -260,6 +285,7 @@ class Trainer:
             "event": "gradient_diagnostic",
             "seed": self.seed,
             "diversity": self.diversity,
+            **self.run_identity(),
             "phase": phase + 1,
             "phase_env_steps": checkpoint_steps,
             "phase_fraction": checkpoint_steps
@@ -283,6 +309,7 @@ class Trainer:
             "config_fingerprint": self.config.fingerprint(),
             "diversity": self.diversity,
             "seed": self.seed,
+            "run_identity": self.run_identity(),
             "phase": self.phase,
             "phase_steps": self.phase_steps,
             "total_steps": self.total_steps,
@@ -322,11 +349,12 @@ class Trainer:
         checkpoint = torch.load(
             self.checkpoint_path, map_location=self.device, weights_only=False
         )
-        expected = (self.config.fingerprint(), self.diversity, self.seed)
+        expected = (self.config.fingerprint(), self.diversity, self.seed, self.run_identity())
         actual = (
             checkpoint["config_fingerprint"],
             checkpoint["diversity"],
             checkpoint["seed"],
+            checkpoint.get("run_identity", self.run_identity()),
         )
         if actual != expected:
             raise RuntimeError(f"Checkpoint identity mismatch: expected {expected}, got {actual}")
@@ -343,7 +371,10 @@ class Trainer:
         elif checkpoint.get("continual_backprop") is not None:
             raise RuntimeError("Unexpected CBP state in a plain-PPO checkpoint")
         self.env.load_state_dict(checkpoint["env"])
-        self.obs = CompactObs(*(value.to(self.device) for value in checkpoint["obs"]))
+        observation_values = tuple(value.to(self.device) for value in checkpoint["obs"])
+        if len(observation_values) == 5:
+            observation_values = (*observation_values, self.env.walls.clone())
+        self.obs = CompactObs(*observation_values)
         self.hidden = checkpoint["hidden"].to(self.device)
         self.episode_start = checkpoint["episode_start"].to(self.device)
         # RNG-state APIs consume CPU ByteTensors, including for CUDA-backed
@@ -368,7 +399,12 @@ class Trainer:
             "diversity": self.diversity,
             "seed": self.seed,
             "device": str(self.device),
-            "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
+            "algorithm": self.algorithm,
+            "catalog_seed": self.catalog_seed,
+            "layout_count": len(self.layout_ids),
+            "topology_count": self.diversity,
+            "unique_layout_topology_pairs": len(self.layout_ids) * self.diversity,
+            "run_identity": self.run_identity(),
             "torch_version": torch.__version__,
             "cuda_version": torch.version.cuda,
             "gpu": torch.cuda.get_device_name(self.device) if self.device.type == "cuda" else None,
@@ -378,10 +414,21 @@ class Trainer:
         }
         _json_dump(self.run_dir / "run.json", payload)
 
+    def run_identity(self) -> dict[str, Any]:
+        return {
+            "algorithm": self.algorithm,
+            "catalog_seed": self.catalog_seed,
+            "vary_layout": self.vary_layout,
+            "layout_count": len(self.layout_ids),
+        }
+
     def run(self, *, stop_after_distributions: int | None = None) -> int:
         if self.completed_path.exists():
             completed = json.loads(self.completed_path.read_text(encoding="utf-8"))
-            if completed.get("config_fingerprint") != self.config.fingerprint():
+            if (
+                completed.get("config_fingerprint") != self.config.fingerprint()
+                or completed.get("run_identity", self.run_identity()) != self.run_identity()
+            ):
                 raise RuntimeError(
                     f"Completed run at {self.run_dir} belongs to a different configuration; "
                     "use a new output root and preserve the existing result"
@@ -408,7 +455,9 @@ class Trainer:
         while self.phase < phase_limit:
             phase = self.phase
             if self.phase_steps == 0:
-                self.env.set_task_pool(self.catalog.task_ids(phase, self.diversity))
+                self.env.set_pools(
+                    self.catalog.task_ids(phase, self.diversity), self.layout_ids
+                )
                 self.obs = self.env.observe()
                 self.hidden.zero_()
                 self.episode_start.fill_(True)
@@ -451,6 +500,7 @@ class Trainer:
                             "event": "optimization",
                             "seed": self.seed,
                             "diversity": self.diversity,
+                            **self.run_identity(),
                             "phase": phase + 1,
                             "phase_env_steps": self.phase_steps,
                             "total_env_steps": self.total_steps,
@@ -469,7 +519,8 @@ class Trainer:
                     return REQUEUE_EXIT_CODE
             self._evaluation(phase, target, "phase_end")
             self._diagnostic(phase, target)
-            self._backward_d1_evaluation(phase)
+            if self.config.experiment.num_distributions > 1:
+                self._backward_d1_evaluation(phase)
             self.phase += 1
             self.phase_steps = 0
             self.save_checkpoint()
@@ -482,7 +533,8 @@ class Trainer:
                 "total_env_steps": self.total_steps,
                 "wall_time_seconds": time.time() - self.started_at,
                 "config_fingerprint": self.config.fingerprint(),
-                "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
+                "algorithm": self.algorithm,
+                "run_identity": self.run_identity(),
                 "cbp_total_replacements": (
                     self.continual_backprop.totals()
                     if self.continual_backprop is not None
@@ -503,7 +555,8 @@ class Trainer:
             "total_env_steps": self.total_steps,
             "wall_time_seconds": time.time() - self.started_at,
             "config_fingerprint": self.config.fingerprint(),
-            "algorithm": "ppo_cbp" if self.continual_backprop is not None else "ppo",
+            "algorithm": self.algorithm,
+            "run_identity": self.run_identity(),
             "cbp_total_replacements": (
                 self.continual_backprop.totals()
                 if self.continual_backprop is not None
@@ -521,6 +574,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--output-root")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--algorithm", choices=("ppo", "ppo_cbp"))
+    parser.add_argument("--catalog-seed", type=int)
+    parser.add_argument("--vary-layout", action="store_true")
     parser.add_argument("--override-steps", type=int)
     parser.add_argument("--stop-after-distributions", type=int)
     return parser.parse_args()
@@ -556,6 +612,9 @@ def main() -> int:
         seed=args.seed,
         output_root=output_root,
         device=device,
+        algorithm=args.algorithm,
+        catalog_seed=args.catalog_seed,
+        vary_layout=args.vary_layout,
     )
     return trainer.run(stop_after_distributions=args.stop_after_distributions)
 

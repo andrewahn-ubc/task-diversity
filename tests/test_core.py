@@ -12,8 +12,9 @@ from banyan_pilot.continual_adam import ContinualAdam
 from banyan_pilot.continual_backprop import ContinualBackprop
 from banyan_pilot.dependency_audit import audit_resolution
 from banyan_pilot.env import DROP, TOGGLE, VectorBanyan
+from banyan_pilot.layouts import build_layout_catalog
 from banyan_pilot.model import RecurrentActorCritic
-from banyan_pilot.ppo import collect_rollout, gradient_cosines, update_ppo
+from banyan_pilot.ppo import collect_rollout, evaluate_policy, gradient_cosines, update_ppo
 from banyan_pilot.reanalyze import _clustered_ols
 from banyan_pilot.taskgen import build_catalog
 
@@ -108,7 +109,7 @@ class PilotCoreTests(unittest.TestCase):
             if task.phase == 0 and task.depth == 1 and len(task.unary_rules) == 1
         )
         env = self.make_env(torch.tensor([task.task_id]), num_envs=1)
-        slot = env.object_slots[0]
+        slot = env.object_slots[0, 0]
         env.agent[0] = slot
         _, reward, done, info = env.step(torch.tensor([TOGGLE]))
         self.assertTrue(done.item())
@@ -131,6 +132,37 @@ class PilotCoreTests(unittest.TestCase):
         self.assertTrue(info["dead_end"][1].item())
         self.assertEqual(reward[1].item(), -1.0)
         self.assertTrue(done.all().item())
+
+    def test_layout_catalog_is_distinct_connected_and_checkpointed(self) -> None:
+        layouts = build_layout_catalog(4, 9, 7, 260608799)
+        self.assertEqual(layouts.count, 4)
+        self.assertEqual(
+            len({walls.numpy().tobytes() for walls in layouts.walls}), 4
+        )
+        env = VectorBanyan(
+            self.catalog,
+            self.catalog.task_ids(0, 4),
+            num_envs=256,
+            grid_size=9,
+            max_episode_steps=32,
+            device=self.device,
+            seed=123,
+            layout_catalog=layouts,
+            layout_ids=torch.arange(4),
+        )
+        self.assertEqual(set(env.layout_index.tolist()), {0, 1, 2, 3})
+        rows = torch.arange(env.num_envs)
+        self.assertFalse(
+            env.walls[rows, env.agent[:, 0], env.agent[:, 1]].any().item()
+        )
+        state = env.state_dict()
+        env.reset()
+        expected_layouts = env.layout_index.clone()
+        expected_walls = env.walls.clone()
+        env.load_state_dict(state)
+        env.reset()
+        torch.testing.assert_close(env.layout_index, expected_layouts)
+        torch.testing.assert_close(env.walls, expected_walls)
 
     def test_environment_checkpoint_preserves_random_stream(self) -> None:
         env = self.make_env(self.catalog.task_ids(0, 16), num_envs=8)
@@ -178,6 +210,38 @@ class PilotCoreTests(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in losses.values()))
         cosines = gradient_cosines(model, rollout, rollout, ppo)
         self.assertAlmostEqual(cosines["cosine_all"], 1.0, delta=1e-4)
+
+    def test_evaluation_is_equal_weighted_across_depths(self) -> None:
+        task_ids = self.catalog.task_ids(0, 1)
+
+        def factory(ids: torch.Tensor, seed: int) -> VectorBanyan:
+            return VectorBanyan(
+                self.catalog,
+                ids,
+                num_envs=4,
+                grid_size=9,
+                max_episode_steps=8,
+                device=self.device,
+                seed=seed,
+            )
+
+        probe = factory(task_ids, 1)
+        model = RecurrentActorCritic(
+            grid_size=9,
+            object_feature_dim=16,
+            hidden_size=32,
+            walls=probe.walls[0],
+        )
+        result = evaluate_policy(model, task_ids, factory, episodes=12, seed=17)
+        self.assertEqual(result["episodes"], 12)
+        self.assertEqual([result[f"episodes_depth_{depth}"] for depth in range(1, 7)], [2] * 6)
+        expected = sum(result[f"success_depth_{depth}"] for depth in range(1, 7)) / 6
+        self.assertAlmostEqual(result["success_rate"], expected)
+        action_rate = sum(
+            result[f"action_{name}_rate"]
+            for name in ("up", "down", "left", "right", "stay", "pickup", "drop", "toggle")
+        )
+        self.assertAlmostEqual(action_rate, 1.0)
 
     def test_continual_adam_matches_torch_adam_before_resets(self) -> None:
         torch.manual_seed(91)

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 
 from .config import PPOConfig
-from .env import CompactObs, VectorBanyan, stack_observations
+from .env import ACTION_COUNT, CompactObs, VectorBanyan, stack_observations
 from .model import RecurrentActorCritic
 
 if TYPE_CHECKING:
@@ -183,6 +183,108 @@ def update_ppo(
 
 
 @torch.no_grad()
+def _evaluate_subset(
+    model: RecurrentActorCritic,
+    catalog_task_ids: torch.Tensor,
+    env_factory: Any,
+    *,
+    episodes: int,
+    seed: int,
+) -> dict[str, float]:
+    device = next(model.parameters()).device
+    successes = torch.zeros((), dtype=torch.int64, device=device)
+    dead_ends = torch.zeros((), dtype=torch.int64, device=device)
+    timeouts = torch.zeros((), dtype=torch.int64, device=device)
+    completed = 0
+    depth_success = torch.zeros(7, dtype=torch.float64, device=device)
+    depth_count = torch.zeros(7, dtype=torch.float64, device=device)
+    action_counts = torch.zeros(ACTION_COUNT, dtype=torch.int64, device=device)
+    effective_counts = {
+        name: torch.zeros((), dtype=torch.int64, device=device)
+        for name in (
+            "movement",
+            "pickup",
+            "drop",
+            "merge",
+            "toggle",
+        )
+    }
+    evaluation_env_transitions = torch.zeros((), dtype=torch.int64, device=device)
+    while completed < episodes:
+        round_seed = seed + 10_000_019 * completed
+        env: VectorBanyan = env_factory(catalog_task_ids, round_seed)
+        obs = env.observe()
+        hidden = model.initial_hidden(env.num_envs, env.device)
+        episode_start = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
+        take = min(episodes - completed, env.num_envs)
+        active = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+        active[:take] = True
+        action_generator = torch.Generator(device=env.device)
+        action_generator.manual_seed(round_seed + 99173)
+        for _ in range(env.max_episode_steps):
+            action, _, _, _, hidden = model.act(
+                obs,
+                hidden,
+                episode_start,
+                deterministic=False,
+                generator=action_generator,
+            )
+            active_before = active.clone()
+            obs, _, done, info = env.step(action)
+            active_actions = action[active_before]
+            action_counts += torch.bincount(
+                active_actions, minlength=ACTION_COUNT
+            )
+            evaluation_env_transitions += active_before.sum()
+            for name in effective_counts:
+                effective_counts[name] += info[f"{name}_effective"][active_before].sum()
+            finished = done & active_before
+            successes += (info["success"] & finished).sum()
+            dead_ends += (info["dead_end"] & finished).sum()
+            timeouts += (info["timeout"] & finished).sum()
+            for depth in range(1, 7):
+                depth_finished = finished & (info["depth"] == depth)
+                depth_count[depth] += depth_finished.sum()
+                depth_success[depth] += (info["success"] & depth_finished).sum()
+            active &= ~done
+            episode_start = done
+        if active.any().item():
+            raise RuntimeError("Evaluation episode exceeded the configured horizon")
+        completed += take
+    result = {
+        "success_rate": int(successes.item()) / completed,
+        "dead_end_rate": int(dead_ends.item()) / completed,
+        "timeout_rate": int(timeouts.item()) / completed,
+        "episodes": completed,
+        "evaluation_env_transitions": int(evaluation_env_transitions.item()),
+    }
+    for depth in range(1, 7):
+        denominator = max(1.0, float(depth_count[depth].item()))
+        result[f"success_depth_{depth}"] = float(depth_success[depth].item()) / denominator
+    action_names = ("up", "down", "left", "right", "stay", "pickup", "drop", "toggle")
+    denominator = max(1, int(evaluation_env_transitions.item()))
+    for index, name in enumerate(action_names):
+        result[f"action_{name}_rate"] = float(action_counts[index].item()) / denominator
+    integer_effective_counts = {
+        name: int(count.item()) for name, count in effective_counts.items()
+    }
+    for name, count in integer_effective_counts.items():
+        result[f"effective_{name}_rate"] = count / denominator
+    manipulation_attempts = int(action_counts[5:].sum().item())
+    effective_manipulations = (
+        integer_effective_counts["pickup"]
+        + integer_effective_counts["drop"]
+        + integer_effective_counts["toggle"]
+    )
+    result["manipulation_attempt_rate"] = manipulation_attempts / denominator
+    result["effective_manipulation_rate"] = effective_manipulations / denominator
+    result["noop_action_rate"] = 1.0 - (
+        integer_effective_counts["movement"] + effective_manipulations
+    ) / denominator
+    return result
+
+
+@torch.no_grad()
 def evaluate_policy(
     model: RecurrentActorCritic,
     catalog_task_ids: torch.Tensor,
@@ -191,51 +293,79 @@ def evaluate_policy(
     episodes: int,
     seed: int,
 ) -> dict[str, float]:
-    env: VectorBanyan = env_factory(catalog_task_ids, seed)
-    obs = env.observe()
-    hidden = model.initial_hidden(env.num_envs, env.device)
-    episode_start = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
-    successes = 0
-    dead_ends = 0
-    timeouts = 0
-    completed = 0
-    depth_success = torch.zeros(7, dtype=torch.float64, device=env.device)
-    depth_count = torch.zeros(7, dtype=torch.float64, device=env.device)
-    action_generator = torch.Generator(device=env.device)
-    action_generator.manual_seed(seed + 99173)
-    while completed < episodes:
-        action, _, _, _, hidden = model.act(
-            obs,
-            hidden,
-            episode_start,
-            deterministic=False,
-            generator=action_generator,
+    """Evaluate with equal depth weight, matching the paper's aggregate metric.
+
+    Episodes are allocated as evenly as possible across the available depths.
+    The headline success, timeout, dead-end, and action rates are arithmetic
+    means of the per-depth rates, so short shallow episodes cannot dominate the
+    result merely because they finish and reset faster.
+    """
+    if episodes < 1:
+        raise ValueError("Evaluation requires at least one episode")
+    probe = env_factory(catalog_task_ids, seed)
+    task_ids = catalog_task_ids.to(probe.device)
+    task_depths = probe.catalog_depths[task_ids]
+    depths = sorted(set(int(value) for value in task_depths.tolist()))
+    if episodes < len(depths):
+        raise ValueError(
+            f"Evaluation episodes ({episodes}) must cover all {len(depths)} depths"
         )
-        obs, _, done, info = env.step(action)
-        finished = torch.nonzero(done, as_tuple=False).flatten()
-        if len(finished):
-            remaining = episodes - completed
-            finished = finished[:remaining]
-            success = info["success"][finished]
-            depths = info["depth"][finished]
-            successes += int(success.sum().item())
-            dead_ends += int(info["dead_end"][finished].sum().item())
-            timeouts += int(info["timeout"][finished].sum().item())
-            for depth in range(1, 7):
-                mask = depths == depth
-                depth_count[depth] += mask.sum()
-                depth_success[depth] += success[mask].sum()
-            completed += len(finished)
-        episode_start = done
+    quotient, remainder = divmod(episodes, len(depths))
+    per_depth: dict[int, dict[str, float]] = {}
+    for offset, depth in enumerate(depths):
+        depth_ids = task_ids[task_depths == depth].cpu()
+        per_depth[depth] = _evaluate_subset(
+            model,
+            depth_ids,
+            env_factory,
+            episodes=quotient + (1 if offset < remainder else 0),
+            seed=seed + 1_000_003 * depth,
+        )
+    averaged_keys = (
+        "success_rate",
+        "dead_end_rate",
+        "timeout_rate",
+        "action_up_rate",
+        "action_down_rate",
+        "action_left_rate",
+        "action_right_rate",
+        "action_stay_rate",
+        "action_pickup_rate",
+        "action_drop_rate",
+        "action_toggle_rate",
+        "effective_movement_rate",
+        "effective_pickup_rate",
+        "effective_drop_rate",
+        "effective_merge_rate",
+        "effective_toggle_rate",
+        "manipulation_attempt_rate",
+        "effective_manipulation_rate",
+        "noop_action_rate",
+    )
     result = {
-        "success_rate": successes / completed,
-        "dead_end_rate": dead_ends / completed,
-        "timeout_rate": timeouts / completed,
-        "episodes": completed,
+        key: sum(per_depth[depth][key] for depth in depths) / len(depths)
+        for key in averaged_keys
     }
+    result["episodes"] = sum(int(per_depth[depth]["episodes"]) for depth in depths)
+    result["evaluation_env_transitions"] = sum(
+        int(per_depth[depth]["evaluation_env_transitions"]) for depth in depths
+    )
     for depth in range(1, 7):
-        denominator = max(1.0, float(depth_count[depth].item()))
-        result[f"success_depth_{depth}"] = float(depth_success[depth].item()) / denominator
+        if depth not in per_depth:
+            result[f"episodes_depth_{depth}"] = 0
+            result[f"success_depth_{depth}"] = 0.0
+            result[f"timeout_depth_{depth}"] = 0.0
+            result[f"dead_end_depth_{depth}"] = 0.0
+            result[f"effective_manipulation_depth_{depth}"] = 0.0
+            continue
+        row = per_depth[depth]
+        result[f"episodes_depth_{depth}"] = int(row["episodes"])
+        result[f"success_depth_{depth}"] = row[f"success_depth_{depth}"]
+        result[f"timeout_depth_{depth}"] = row["timeout_rate"]
+        result[f"dead_end_depth_{depth}"] = row["dead_end_rate"]
+        result[f"effective_manipulation_depth_{depth}"] = row[
+            "effective_manipulation_rate"
+        ]
     return result
 
 

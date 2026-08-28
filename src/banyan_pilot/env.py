@@ -5,6 +5,7 @@ from typing import Any
 
 import torch
 
+from .layouts import LayoutCatalog, build_fixed_layout_catalog
 from .taskgen import TaskCatalog
 
 
@@ -19,12 +20,13 @@ class CompactObs:
     goal: torch.Tensor
     held: torch.Tensor
     elapsed: torch.Tensor
+    walls: torch.Tensor
 
     def to(self, device: torch.device | str) -> "CompactObs":
         return CompactObs(*(value.to(device) for value in self.as_tuple()))
 
     def as_tuple(self) -> tuple[torch.Tensor, ...]:
-        return self.objects, self.agent, self.goal, self.held, self.elapsed
+        return self.objects, self.agent, self.goal, self.held, self.elapsed, self.walls
 
     def clone(self) -> "CompactObs":
         return CompactObs(*(value.clone() for value in self.as_tuple()))
@@ -47,6 +49,8 @@ class VectorBanyan:
         max_episode_steps: int,
         device: torch.device,
         seed: int,
+        layout_catalog: LayoutCatalog | None = None,
+        layout_ids: torch.Tensor | None = None,
     ) -> None:
         if grid_size < 7:
             raise ValueError("grid_size must be at least 7")
@@ -56,10 +60,23 @@ class VectorBanyan:
         self.grid_size = grid_size
         self.max_episode_steps = max_episode_steps
         self.task_pool = task_ids.to(device)
+        self.layout_catalog = layout_catalog or build_fixed_layout_catalog(
+            grid_size, catalog.max_leaves
+        )
+        if self.layout_catalog.walls.shape[1:] != (grid_size, grid_size):
+            raise ValueError("Layout grid size does not match the environment")
+        if self.layout_catalog.object_slots.shape[1] < catalog.max_leaves:
+            raise ValueError("Layout catalog has too few object slots")
+        if layout_ids is None:
+            layout_ids = torch.arange(self.layout_catalog.count, dtype=torch.int64)
+        self.layout_pool = layout_ids.to(device)
+        if not len(self.layout_pool):
+            raise ValueError("layout_ids cannot be empty")
         self.generator = torch.Generator(device=device)
         self.generator.manual_seed(seed)
-        self.walls = self._make_walls(grid_size, device)
-        self.object_slots = self._make_object_slots(grid_size, catalog.max_leaves, device)
+        self.catalog_walls = self.layout_catalog.walls.to(device)
+        self.catalog_agent_starts = self.layout_catalog.agent_starts.to(device)
+        self.catalog_object_slots = self.layout_catalog.object_slots.to(device)
         self.catalog_leaves = catalog.leaves.to(device)
         self.catalog_unary = catalog.unary.to(device)
         self.catalog_binary = catalog.binary.to(device)
@@ -72,40 +89,26 @@ class VectorBanyan:
         self.held = torch.full((num_envs,), -1, dtype=torch.int64, device=device)
         self.elapsed = torch.zeros(num_envs, dtype=torch.int64, device=device)
         self.task_index = torch.zeros(num_envs, dtype=torch.int64, device=device)
+        self.layout_index = torch.zeros(num_envs, dtype=torch.int64, device=device)
         self.root = torch.zeros(num_envs, dtype=torch.int64, device=device)
         self.depth = torch.zeros(num_envs, dtype=torch.int64, device=device)
+        self.walls = torch.zeros(
+            (num_envs, grid_size, grid_size), dtype=torch.bool, device=device
+        )
+        self.object_slots = torch.zeros(
+            (num_envs, catalog.max_leaves, 2), dtype=torch.int64, device=device
+        )
         self.reset()
-
-    @staticmethod
-    def _make_walls(size: int, device: torch.device) -> torch.Tensor:
-        walls = torch.zeros((size, size), dtype=torch.bool, device=device)
-        walls[0, :] = walls[-1, :] = True
-        walls[:, 0] = walls[:, -1] = True
-        middle = size // 2
-        walls[2 : size - 2, middle] = True
-        walls[middle, middle] = False
-        walls[2, middle] = False
-        walls[size - 3, middle] = False
-        return walls
-
-    @staticmethod
-    def _make_object_slots(size: int, count: int, device: torch.device) -> torch.Tensor:
-        candidates = [
-            (1, size - 2),
-            (size - 2, 1),
-            (size - 2, size - 2),
-            (1, size // 2 - 1),
-            (size // 2, 1),
-            (size // 2, size - 2),
-            (size - 2, size // 2 + 1),
-            (1, 2),
-        ]
-        if count > len(candidates):
-            raise ValueError("max_leaves exceeds available fixed object slots")
-        return torch.tensor(candidates[:count], dtype=torch.int64, device=device)
 
     def set_task_pool(self, task_ids: torch.Tensor) -> CompactObs:
         self.task_pool = task_ids.to(self.device)
+        return self.reset()
+
+    def set_pools(self, task_ids: torch.Tensor, layout_ids: torch.Tensor) -> CompactObs:
+        self.task_pool = task_ids.to(self.device)
+        self.layout_pool = layout_ids.to(self.device)
+        if not len(self.task_pool) or not len(self.layout_pool):
+            raise ValueError("Task and layout pools cannot be empty")
         return self.reset()
 
     def _sample_tasks(self, count: int) -> torch.Tensor:
@@ -113,6 +116,12 @@ class VectorBanyan:
             0, len(self.task_pool), (count,), generator=self.generator, device=self.device
         )
         return self.task_pool[choices]
+
+    def _sample_layouts(self, count: int) -> torch.Tensor:
+        choices = torch.randint(
+            0, len(self.layout_pool), (count,), generator=self.generator, device=self.device
+        )
+        return self.layout_pool[choices]
 
     def reset(self, mask: torch.Tensor | None = None) -> CompactObs:
         if mask is None:
@@ -123,20 +132,25 @@ class VectorBanyan:
         if count == 0:
             return self.observe()
         tasks = self._sample_tasks(count)
+        layouts = self._sample_layouts(count)
         self.task_index[indices] = tasks
+        self.layout_index[indices] = layouts
         self.root[indices] = self.catalog_roots[tasks]
         self.depth[indices] = self.catalog_depths[tasks]
+        self.walls[indices] = self.catalog_walls[layouts]
+        self.object_slots[indices] = self.catalog_object_slots[layouts]
         self.objects[indices] = -1
-        self.agent[indices, 0] = 1
-        self.agent[indices, 1] = 1
+        self.agent[indices] = self.catalog_agent_starts[layouts]
         self.held[indices] = -1
         self.elapsed[indices] = 0
         leaves = self.catalog_leaves[tasks]
-        for slot_index, (row, col) in enumerate(self.object_slots.tolist()):
+        for slot_index in range(self.catalog.max_leaves):
             values = leaves[:, slot_index]
             valid = values >= 0
             if valid.any():
-                self.objects[indices[valid], row, col] = values[valid]
+                valid_indices = indices[valid]
+                positions = self.object_slots[valid_indices, slot_index]
+                self.objects[valid_indices, positions[:, 0], positions[:, 1]] = values[valid]
         return self.observe()
 
     def observe(self) -> CompactObs:
@@ -146,6 +160,7 @@ class VectorBanyan:
             goal=self.root,
             held=self.held,
             elapsed=self.elapsed.float() / float(self.max_episode_steps),
+            walls=self.walls,
         )
 
     def step(
@@ -158,7 +173,7 @@ class VectorBanyan:
         proposed = self.agent.clone()
         proposed[:, 0] += (actions == DOWN).long() - (actions == UP).long()
         proposed[:, 1] += (actions == RIGHT).long() - (actions == LEFT).long()
-        blocked = self.walls[proposed[:, 0], proposed[:, 1]]
+        blocked = self.walls[env_ids, proposed[:, 0], proposed[:, 1]]
         moving = actions <= RIGHT
         apply_move = moving & ~blocked
         self.agent[apply_move] = proposed[apply_move]
@@ -177,6 +192,7 @@ class VectorBanyan:
         self.objects[env_ids[empty_drop], row[empty_drop], col[empty_drop]] = self.held[empty_drop]
         self.held[empty_drop] = -1
         merge = drop & (cell >= 0)
+        valid_merge = torch.zeros_like(success)
         if merge.any():
             merge_ids = env_ids[merge]
             left = torch.minimum(self.held[merge], cell[merge])
@@ -191,9 +207,11 @@ class VectorBanyan:
                 self.objects[valid_ids, row[valid_ids], col[valid_ids]] = output[found]
                 self.held[valid_ids] = -1
                 success[valid_ids] = output[found] == self.root[valid_ids]
+                valid_merge[valid_ids] = True
             dead_end[merge_ids[~found]] = True
 
         toggle = (actions == TOGGLE) & (cell >= 0)
+        valid_toggle = torch.zeros_like(success)
         if toggle.any():
             toggle_ids = env_ids[toggle]
             rules = self.catalog_unary[self.task_index[toggle]]
@@ -205,6 +223,7 @@ class VectorBanyan:
             if found.any():
                 self.objects[valid_ids, row[valid_ids], col[valid_ids]] = output[found]
                 success[valid_ids] = output[found] == self.root[valid_ids]
+                valid_toggle[valid_ids] = True
             dead_end[toggle_ids[~found]] = True
 
         self.elapsed += 1
@@ -218,6 +237,12 @@ class VectorBanyan:
             "timeout": timeout.clone(),
             "task_index": self.task_index.clone(),
             "depth": self.depth.clone(),
+            "layout_index": self.layout_index.clone(),
+            "movement_effective": apply_move.clone(),
+            "pickup_effective": pickup.clone(),
+            "drop_effective": (empty_drop | valid_merge).clone(),
+            "merge_effective": valid_merge.clone(),
+            "toggle_effective": valid_toggle.clone(),
         }
         self.reset(done)
         return self.observe(), rewards, done, info
@@ -225,20 +250,39 @@ class VectorBanyan:
     def state_dict(self) -> dict[str, Any]:
         return {
             "task_pool": self.task_pool.cpu(),
+            "layout_pool": self.layout_pool.cpu(),
             "generator_state": self.generator.get_state().cpu(),
             "objects": self.objects.cpu(),
             "agent": self.agent.cpu(),
             "held": self.held.cpu(),
             "elapsed": self.elapsed.cpu(),
             "task_index": self.task_index.cpu(),
+            "layout_index": self.layout_index.cpu(),
             "root": self.root.cpu(),
             "depth": self.depth.cpu(),
+            "walls": self.walls.cpu(),
+            "object_slots": self.object_slots.cpu(),
         }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         self.task_pool = state["task_pool"].to(self.device)
+        if "layout_pool" in state:
+            self.layout_pool = state["layout_pool"].to(self.device)
         # Generator state is serialized as a CPU ByteTensor. PyTorch expects
         # that representation even when the generator produces CUDA tensors.
         self.generator.set_state(state["generator_state"].cpu())
-        for name in ("objects", "agent", "held", "elapsed", "task_index", "root", "depth"):
+        for name in (
+            "objects",
+            "agent",
+            "held",
+            "elapsed",
+            "task_index",
+            "layout_index",
+            "root",
+            "depth",
+            "walls",
+            "object_slots",
+        ):
+            if name not in state:
+                continue
             setattr(self, name, state[name].to(self.device))

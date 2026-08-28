@@ -32,6 +32,8 @@ class RecurrentActorCritic(nn.Module):
         self.object_feature_dim = object_feature_dim
         self.hidden_size = hidden_size
         self.register_buffer("object_feature_table", object_features(object_feature_dim))
+        if walls.ndim == 3:
+            walls = walls[0]
         self.register_buffer("walls", walls.float()[None, None])
         in_channels = object_feature_dim + 3
         self.encoder = nn.Sequential(
@@ -82,7 +84,7 @@ class RecurrentActorCritic(nn.Module):
         rows = torch.arange(batch, device=obs.objects.device)
         agent_grid[rows, 0, obs.agent[:, 0], obs.agent[:, 1]] = 1.0
         object_present = valid.float()[:, None]
-        walls = self.walls.expand(batch, -1, -1, -1)
+        walls = obs.walls.float()[:, None]
         grid = torch.cat((walls, agent_grid, object_present, object_grid), dim=1)
         conv1 = self.encoder[1](self.encoder[0](grid))
         conv2 = self.encoder[3](self.encoder[2](conv1))
