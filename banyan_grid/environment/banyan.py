@@ -129,6 +129,7 @@ class Banyan:
         pickup_shaping_leaf_reward: float = 0.05,
         pickup_shaping_root_reward: float = 0.2,
         goal_reward_scale: float = 1.0,
+        step_penalty: float = -0.001,
     ):
         if rules is not None:
             raise ValueError(
@@ -154,6 +155,7 @@ class Banyan:
         self.pickup_shaping_leaf_reward = float(pickup_shaping_leaf_reward)
         self.pickup_shaping_root_reward = float(pickup_shaping_root_reward)
         self.goal_reward_scale = float(goal_reward_scale)
+        self.step_penalty = float(step_penalty)
         self.max_steps = max_steps
 
         self._action_space = Discrete(NUM_ACTIONS)
@@ -873,7 +875,7 @@ class Banyan:
         else:
             shaping_reward = 0.1 * jnp.any(gained_relevant).astype(jnp.float32)
         # a small per-step time penalty
-        base_reward = reward + shaping_reward + distractor_penalty + (-0.001)
+        base_reward = reward + shaping_reward + distractor_penalty + self.step_penalty
         timeout_only = is_timeout & (~done_goal) & (~dead_end)
         timeout_penalty = jnp.where(
             timeout_only,

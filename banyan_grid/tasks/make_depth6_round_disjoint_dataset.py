@@ -931,6 +931,7 @@ def _generate_round_dataset(
     max_instantiation_attempts: int,
     blocked_topology_signatures: set[str],
     blocked_operation_signatures: set[OperationSignature],
+    unique_topologies_within_round: bool,
     max_new_unary_signatures_per_round: int,
     max_new_binary_signatures_per_round: int,
     rng: np.random.Generator,
@@ -964,7 +965,8 @@ def _generate_round_dataset(
             depth=int(max_depth),
             base_pool=base_pool,
             base_seed=int(base_seed),
-            blocked_topology_signatures=blocked_topology_signatures,
+            blocked_topology_signatures=(blocked_topology_signatures | round_topology_signature_set
+                                         if unique_topologies_within_round else blocked_topology_signatures),
             blocked_operation_signatures=blocked_operation_signatures,
             round_operation_signatures=round_operation_signature_set,
             remaining_new_signatures_by_kind=remaining_new,
@@ -1051,7 +1053,7 @@ def _generate_round_dataset(
             'producer_signatures_across_rounds_only': True,
             'depth6_topologies_across_rounds_only': True,
             'same_round_signature_reuse_allowed': True,
-            'same_round_topology_reuse_allowed': True,
+            'same_round_topology_reuse_allowed': not unique_topologies_within_round,
             'items_may_repeat': True,
         },
         'sampling_budgets': {
@@ -1137,6 +1139,7 @@ def _run_for_single_n(args: argparse.Namespace, n: int, out_root: Path) -> dict:
             max_instantiation_attempts=int(args.max_instantiation_attempts),
             blocked_topology_signatures=blocked_topology_signatures,
             blocked_operation_signatures=blocked_operation_signatures,
+            unique_topologies_within_round=bool(args.unique_topologies_within_round),
             max_new_unary_signatures_per_round=int(args.max_new_unary_signatures_per_round),
             max_new_binary_signatures_per_round=int(args.max_new_binary_signatures_per_round),
             rng=round_rng,
@@ -1199,7 +1202,7 @@ def _run_for_single_n(args: argparse.Namespace, n: int, out_root: Path) -> dict:
             'depth6_topologies_disjoint_across_rounds': True,
             'producer_signatures_disjoint_across_rounds': True,
             'same_round_signature_reuse_allowed': True,
-            'same_round_topology_reuse_allowed': True,
+            'same_round_topology_reuse_allowed': not bool(args.unique_topologies_within_round),
         },
         'global_unique_depth6_topologies_after_all_rounds': len(blocked_topology_signatures),
         'global_unique_producer_signatures_after_all_rounds': len(blocked_operation_signatures),
@@ -1352,6 +1355,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "Optional hard cap on how many NEW binary signatures a round may introduce. "
             "0 means auto-budget from remaining cross-round capacity."
         ),
+    )
+    ap.add_argument(
+        "--unique-topologies-within-round",
+        action="store_true",
+        help="Require exactly n distinct depth-6 topology signatures in each round.",
     )
     ap.add_argument(
         "--out-dir",

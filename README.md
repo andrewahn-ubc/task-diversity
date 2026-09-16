@@ -48,6 +48,8 @@ Actions and rewards are scalars; observations are flat arrays; `done` is a scala
 
 [`run_tournament`](banyan_grid/rounds/tournament.py) takes a config plus user-supplied `make_train` / `make_eval` factories, and provides round scheduling, checkpointing, replay, and cross-round evaluation. Baselines are not bundled.
 
+For the recurrent PPO + Continual Backprop pilot and seven-distribution experiment, see [CONTINUAL.md](CONTINUAL.md).
+
 ## Development
 
 ```bash
