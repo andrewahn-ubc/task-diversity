@@ -1,0 +1,4 @@
+include scripts/*.py
+include uv.lock
+include .python-version
+include DATASETS.md

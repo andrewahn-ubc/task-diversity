@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["banyan_grid*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "banyan_grid.__version__" }
+
+[project]
+name = "banyan-grid"
+description = "Banyan: a JAX environment and continual-learning round harness for compositional-task RL research"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dynamic = ["version"]
+dependencies = [
+    "chex>=0.1.91",
+    "flax>=0.12.1",
+    "jax>=0.8.1; sys_platform != 'linux'",
+    "jax[cuda12]>=0.8.1; sys_platform == 'linux'",
+    "matplotlib>=3.10",
+    "numpy>=1.26",
+    "pyyaml>=6.0.3",
+    "wandb>=0.23.1",
+    "wrapt<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts insert the repo root on sys.path before package imports so they can
+# run without installation; imports after that block are intentional.
+"scripts/*.py" = ["E402"]
+# Research-generator internals kept byte-compatible with the original code:
+# a duplicated-but-identical helper (F811) and a dead local (F841).
+"banyan_grid/tasks/make_ruleset_dataset.py" = ["F811"]
+"banyan_grid/utils/banyan.py" = ["F841"]
