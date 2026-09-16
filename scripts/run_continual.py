@@ -44,12 +44,17 @@ def config_for(mode: str, variant: str, selected: Path | None) -> dict:
     if mode == "pilot":
         cfg.update(VARIANTS[variant])
         cfg.update(rounds=3, steps_per_phase=10_000_000, eval_every_steps=2_000_000)
-    else:
-        if selected is None or not selected.exists():
-            raise FileNotFoundError("Run the pilot and select_pilot.py before full reproduction")
-        selection = json.loads(selected.read_text())
-        cfg.update(selection["hyperparameters"])
+    elif mode == "full":
+        if variant == "selected":
+            if selected is None or not selected.exists():
+                raise FileNotFoundError("Run the pilot and select_pilot.py before full reproduction")
+            selection = json.loads(selected.read_text())
+            cfg.update(selection["hyperparameters"])
+        else:
+            cfg.update(VARIANTS[variant])
         cfg.update(rounds=7, steps_per_phase=100_000_000)
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
     return cfg
 
 
@@ -199,7 +204,7 @@ def main() -> None:
     parser.add_argument("--mode", choices=("pilot", "full"), required=True)
     parser.add_argument("--n", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--variant", choices=tuple(VARIANTS), default="base")
+    parser.add_argument("--variant", choices=("selected", *VARIANTS), default=None)
     parser.add_argument("--root", type=Path, default=Path("outputs/continual"))
     parser.add_argument("--selected", type=Path, default=Path("outputs/continual/pilot_best.json"))
     parser.add_argument("--max-minutes", type=float, default=48.0)
@@ -208,9 +213,11 @@ def main() -> None:
         parser.error(f"--n must be one of {N_VALUES}")
     if args.mode == "pilot" and args.n not in (4, 64):
         parser.error("Pilot uses n=4 and n=64")
-    cfg = config_for(args.mode, args.variant, args.selected)
+    variant = args.variant or ("base" if args.mode == "pilot" else "selected")
+    if args.mode == "pilot" and variant == "selected":
+        parser.error("The pilot requires a named hyperparameter variant")
+    cfg = config_for(args.mode, variant, args.selected)
     root = args.root.resolve()
-    variant = args.variant if args.mode == "pilot" else "selected"
     run_dir = root / "runs" / args.mode / f"n{args.n:04d}" / variant / f"seed{args.seed}"
     checkpoint = run_dir / "checkpoint.pkl"
     metrics_file = run_dir / "metrics.jsonl"

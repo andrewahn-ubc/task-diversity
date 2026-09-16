@@ -35,7 +35,8 @@ def load_run(root: Path, n: int, seed: int, mode: str, variant: str) -> list[dic
     return sorted(dedup.values(), key=lambda r: (r["env_steps"], r["phase"]))
 
 
-def plot(root: Path, mode: str, seeds: list[int], output: Path) -> None:
+def plot(root: Path, mode: str, seeds: list[int], output: Path,
+         full_variant: str = "selected") -> None:
     n_values = (1, 4, 16, 64, 256) if mode == "full" else (4, 64)
     rounds = 7 if mode == "full" else 3
     target = 100_000_000 if mode == "full" else 10_000_000
@@ -44,7 +45,7 @@ def plot(root: Path, mode: str, seeds: list[int], output: Path) -> None:
                             constrained_layout=True)
     any_data = False
     max_x = 0
-    variants = ("selected",) if mode == "full" else tuple(VARIANTS)
+    variants = (full_variant,) if mode == "full" else tuple(VARIANTS)
     styles = {"base": "-", "lower_lr": "--", "more_entropy": ":", "more_cbp": "-."}
     for n in n_values:
         for variant in variants:
@@ -100,11 +101,17 @@ def main() -> None:
     p.add_argument("--mode", choices=("pilot", "full"), default="full")
     p.add_argument("--root", type=Path, default=Path("outputs/continual"))
     p.add_argument("--seeds", default=None)
+    p.add_argument("--variant", choices=("selected", *VARIANTS), default="selected",
+                   help="Setting to plot for a full run (default: pilot-selected)")
     p.add_argument("--output", type=Path, default=None)
     args = p.parse_args()
+    if args.mode == "pilot" and args.variant != "selected":
+        p.error("--variant applies only to full runs")
     seeds = [int(x) for x in (args.seeds or ("0,1,2" if args.mode == "full" else "0,1")).split(",")]
-    output = args.output or args.root / f"{args.mode}_figure6.png"
-    plot(args.root.resolve(), args.mode, seeds, output.resolve())
+    name = (f"full_{args.variant}_figure6.png" if args.mode == "full" and
+            args.variant != "selected" else f"{args.mode}_figure6.png")
+    output = args.output or args.root / name
+    plot(args.root.resolve(), args.mode, seeds, output.resolve(), args.variant)
 
 
 if __name__ == "__main__":

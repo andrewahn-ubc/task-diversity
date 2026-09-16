@@ -2,8 +2,18 @@
 # Submit pilot or full experiment. Each training trajectory chains sub-hour jobs.
 set -euo pipefail
 mode="${1:-}"
-if [[ "$mode" != pilot && "$mode" != full ]]; then
-  echo "Usage: bash scripts/submit_narval.sh pilot|full" >&2
+setting="${2:-selected}"
+if [[ "$mode" != pilot && "$mode" != full || $# -gt 2 ]]; then
+  echo "Usage: bash scripts/submit_narval.sh pilot|full [base|lower_lr|more_entropy|more_cbp]" >&2
+  exit 2
+fi
+if [[ "$mode" == pilot && $# -ne 1 ]]; then
+  echo "The pilot submits all variants; omit the second argument." >&2
+  exit 2
+fi
+if [[ "$mode" == full && "$setting" != selected && "$setting" != base &&
+      "$setting" != lower_lr && "$setting" != more_entropy && "$setting" != more_cbp ]]; then
+  echo "Unknown full-run setting: $setting" >&2
   exit 2
 fi
 cd "$(dirname "$0")/.."
@@ -15,10 +25,12 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 1
 fi
 if [[ "$mode" == full ]]; then
-  ./.venv/bin/python scripts/select_pilot.py
+  if [[ "$setting" == selected ]]; then
+    ./.venv/bin/python scripts/select_pilot.py
+  fi
   ns=(1 4 16 64 256)
   seeds=(0 1 2)
-  variants=(base)
+  variants=("$setting")
 else
   ns=(4 64)
   seeds=(0 1)

@@ -36,13 +36,23 @@ When all pilot trajectories finish, choose the winner and view the pilot curves:
 bash scripts/submit_narval.sh full
 ```
 
+To run the full experiment with the **base** hyperparameters regardless of the pilot winner, use:
+
+```bash
+bash scripts/submit_narval.sh full base
+```
+
+This leaves `pilot_best.json` intact. Base and pilot-selected runs use separate checkpoint and metric directories under `outputs/continual/runs/full/`. Re-running the submission command creates another set of jobs; use `scripts/resume_narval.sh` only for an interrupted trajectory.
+
 After all full trajectories finish:
 
 ```bash
 ./.venv/bin/python scripts/plot_continual.py --mode full
+# For the base run:
+./.venv/bin/python scripts/plot_continual.py --mode full --variant base
 ```
 
-The last command writes `outputs/continual/full_figure6.png` and `outputs/continual/full_figure6.svg`, with all-depth and depth-6 panels, phase boundaries, and mean ± one standard deviation across the three seeds. Plots use actual logged success rates; none are fabricated in advance.
+The default plot command writes `outputs/continual/full_figure6.png` and `.svg`; the base command writes `outputs/continual/full_base_figure6.png` and `.svg`. Each has all-depth and depth-6 panels, phase boundaries, and mean ± one standard deviation across the three seeds. Plots use actual logged success rates; none are fabricated in advance.
 
 ## Design
 
@@ -80,7 +90,8 @@ If a job exits with an error, inspect `logs/train-<job-id>.out`, fix the issue, 
 
 ```bash
 bash scripts/resume_narval.sh pilot 4 0 base
-# or: bash scripts/resume_narval.sh full 256 0
+# Pilot-selected full run: bash scripts/resume_narval.sh full 256 0
+# Base full run: bash scripts/resume_narval.sh full 256 0 base
 ```
 
 The measured GPU throughput is hardware and allocation dependent. The 59-minute limit is enforced by Slurm, but a batch interrupted during its first compilation can lose its uncheckpointed work; the last completed checkpoint remains valid. The full experiment contains roughly 10.5 billion environment steps across 15 trajectories and may require substantial aggregate GPU time even though every individual job stays under one hour.

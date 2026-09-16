@@ -15,11 +15,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 ./.venv/bin/python scripts/run_continual.py \
   --mode "${MODE:?}" --n "${N:?}" --seed "${SEED:?}" \
   --variant "${VARIANT:?}" --max-minutes 40
-if [[ "$MODE" == pilot ]]; then
-  run_dir="outputs/continual/runs/pilot/n$(printf '%04d' "$N")/$VARIANT/seed$SEED"
-else
-  run_dir="outputs/continual/runs/full/n$(printf '%04d' "$N")/selected/seed$SEED"
-fi
+run_dir="outputs/continual/runs/$MODE/n$(printf '%04d' "$N")/$VARIANT/seed$SEED"
 complete=$(./.venv/bin/python -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["complete"]))' "$run_dir/progress.json")
 if [[ "$complete" == 0 ]]; then
   sbatch --parsable --dependency="afterok:${SLURM_JOB_ID}" \
