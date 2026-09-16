@@ -7,4 +7,5 @@
 set -euo pipefail
 cd "${REPO_DIR:?}"
 module load python/3.13.2
+unset PYTHONPATH
 ./.venv/bin/python scripts/prepare_continual.py --mode "${MODE:?}" --n "${N:?}"

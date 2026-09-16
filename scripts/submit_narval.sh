@@ -9,6 +9,7 @@ fi
 cd "$(dirname "$0")/.."
 export REPO_DIR="$PWD"
 module load python/3.13.2
+unset PYTHONPATH
 if [[ ! -x .venv/bin/python ]]; then
   echo "Run bash scripts/setup_narval.sh first" >&2
   exit 1

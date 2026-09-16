@@ -8,5 +8,6 @@
 set -euo pipefail
 cd "${REPO_DIR:?}"
 module load python/3.13.2
+unset PYTHONPATH
 export JAX_PLATFORMS=gpu
 ./.venv/bin/python scripts/check_narval.py
