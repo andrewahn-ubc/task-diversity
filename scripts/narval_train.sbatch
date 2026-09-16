@@ -4,8 +4,9 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --gpus-per-node=1
-#SBATCH --signal=B:USR1@1200
 #SBATCH --output=logs/train-%j.out
+# The Python runner checkpoints and exits after 40 minutes. A B:USR1 warning
+# would instead signal this batch shell and prevent the successor submission.
 set -euo pipefail
 cd "${REPO_DIR:?}"
 module load python/3.13.2

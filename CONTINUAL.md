@@ -84,7 +84,7 @@ Selection averages a score over both diversity values and both seeds: `0.5 × fi
 
 ## Job limits, checkpoints, and recovery
 
-Each Slurm job has a 59-minute wall limit. The Python runner stops after 40 minutes or on Slurm's 20-minute warning, checkpoints after the current PPO update, and the job script submits its successor with an `afterok` dependency. A single phase can span many jobs. Checkpoints store policy, value head, GRU, Adam moments, CBP traces, RNG, and live environments; the successor resumes without restarting the phase. Metrics are append-only JSONL files under `outputs/continual/runs/`.
+Each Slurm job has a 59-minute wall limit. The Python runner stops after 40 minutes, checkpoints after the current PPO update, and the job script submits its successor with an `afterok` dependency. A single phase can span many jobs. Checkpoints store policy, value head, GRU, Adam moments, CBP traces, RNG, and live environments; the successor resumes without restarting the phase. Metrics are append-only JSONL files under `outputs/continual/runs/`.
 
 If a job exits with an error, inspect `logs/train-<job-id>.out`, fix the issue, and submit that trajectory again:
 
@@ -93,6 +93,18 @@ bash scripts/resume_narval.sh pilot 4 0 base
 # Pilot-selected full run: bash scripts/resume_narval.sh full 256 0
 # Base full run: bash scripts/resume_narval.sh full 256 0 base
 ```
+
+To resume every trajectory in an interrupted base full run after fixing the cause, submit one replacement job for each diversity value and seed:
+
+```bash
+for n in 1 4 16 64 256; do
+  for seed in 0 1 2; do
+    bash scripts/resume_narval.sh full "$n" "$seed" base
+  done
+done
+```
+
+Use this only after the previous jobs have stopped; otherwise the same trajectory could have two writers. Each replacement reads its last checkpoint and continues the automatic chain.
 
 The measured GPU throughput is hardware and allocation dependent. The 59-minute limit is enforced by Slurm, but a batch interrupted during its first compilation can lose its uncheckpointed work; the last completed checkpoint remains valid. The full experiment contains roughly 10.5 billion environment steps across 15 trajectories and may require substantial aggregate GPU time even though every individual job stays under one hour.
 
