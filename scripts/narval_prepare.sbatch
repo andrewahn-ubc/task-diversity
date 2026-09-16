@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --account=rrg-mijungp_gpu
+#SBATCH --account=def-mijungp
 #SBATCH --time=00:59:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
