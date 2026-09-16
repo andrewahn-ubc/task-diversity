@@ -21,6 +21,8 @@ The September 2026 `uv.lock` contains 75 third-party packages. Every one has a p
 
 Run from a shell without a separately loaded CUDA/cuDNN module. [JAX notes](https://docs.jax.dev/en/latest/installation.html) that `LD_LIBRARY_PATH` can override the CUDA libraries supplied by its pip wheels.
 
+The GPU job scripts set `JAX_PLATFORMS=cuda`. In JAX 0.11, `gpu` expands to multiple backends, including ROCm; requiring ROCm initialization makes the preflight fail on Narval's NVIDIA nodes.
+
 When all pilot trajectories finish, choose the winner and view the pilot curves:
 
 ```bash

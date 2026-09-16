@@ -10,7 +10,7 @@ set -euo pipefail
 cd "${REPO_DIR:?}"
 module load python/3.13.2
 unset PYTHONPATH
-export JAX_PLATFORMS=gpu
+export JAX_PLATFORMS=cuda
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 ./.venv/bin/python scripts/run_continual.py \
   --mode "${MODE:?}" --n "${N:?}" --seed "${SEED:?}" \

@@ -49,12 +49,12 @@ def check_environment() -> None:
     import jax
     import jax.numpy as jnp
 
-    assert jax.default_backend() == "gpu", f"JAX selected {jax.default_backend()}"
-    assert jax.devices("gpu"), "JAX did not detect a GPU"
+    cuda_devices = jax.devices("cuda")
+    assert cuda_devices, "JAX did not detect a CUDA GPU"
     result = jax.jit(lambda x: x @ x)(jnp.eye(16, dtype=jnp.float32))
     result.block_until_ready()
-    assert result.device.platform == "gpu", f"JAX calculation ran on {result.device}"
-    print(f"GPU JAX smoke test passed on {result.device}")
+    assert result.device in cuda_devices, f"JAX calculation ran on {result.device}"
+    print(f"CUDA JAX smoke test passed on {result.device}")
 
 
 if __name__ == "__main__":
